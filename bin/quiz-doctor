@@ -9,7 +9,6 @@ case "${1:-}" in
     -h|--help)
         echo 'quiz-doctor: verifica instalação DOM/CDP sem clicar ou consultar o Claude.'
         echo 'quiz-doctor env: compara consultas sintéticas terminal/Hyprland (consome cota).'
-        echo 'OCR, grim, slurp e ydotool pertencem ao legado em lib/sh/doctor-legacy.sh.'
         exit 0 ;;
     env) shift; action=envcheck ;;
     '') action=doctor ;;

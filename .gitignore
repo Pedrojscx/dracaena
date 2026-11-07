@@ -1,11 +1,8 @@
 # Imagens e caches gerados pelos testes
 tests/fixtures/out/
-*.page.json
-*.ocr.json
 
 # Capturas, logs e saídas de execução (nunca versionar prints de tela)
 *.png
-*.ppm
 *.log
 runs/
 
@@ -117,7 +114,6 @@ loop.lock
 ask.lock
 *.jsonl
 *.tsv
-*.ocr.txt
 doctor-*.json
 doctor-*.txt
 chromium/

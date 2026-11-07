@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
-# Suíte DOM offline. --legacy executa a suíte antiga OCR/replay.
+# Suíte DOM offline.
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [[ "${1:-}" == --legacy ]]; then
-    shift
-    exec "$REPO/tests/run-legacy.sh" "$@"
-fi
 if (( $# )); then
-    echo 'Uso: tests/run.sh [--legacy [opções do runner legado]]' >&2
+    echo 'Uso: tests/run.sh' >&2
     exit 2
 fi
 cd "$REPO" || exit 1
@@ -23,7 +19,7 @@ export QH_NOTIFY_ENABLED=0 QH_REAL_FIXTURES="$TEST_HOME/no-real-fixtures"
 export PYTHONPATH="$REPO/lib:$REPO/tests/py"
 mkdir -p "$XDG_RUNTIME_DIR"
 status=0
-scripts=(bin/* lib/sh/*.sh install.sh uninstall.sh tests/*.sh tests/input/run.sh tests/input/mocks/* tests/replay/run.sh)
+scripts=(bin/* lib/sh/*.sh install.sh uninstall.sh tests/*.sh)
 for script in "${scripts[@]}"; do
     bash -n "$script" || status=1
 done

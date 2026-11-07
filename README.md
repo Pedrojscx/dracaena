@@ -2,7 +2,7 @@
 
 Ferramenta local para ler atividades do NetAcad pelo DOM, consultar o Claude Code e aplicar respostas pelo Playwright, conectado ao Vivaldi via Chrome DevTools Protocol (CDP). Os comandos continuam se chamando `quiz-helper`/`quiz-*`.
 
-O ambiente de uso validado é Linux com Hyprland e Vivaldi. Outros sistemas e navegadores não foram validados. A implementação anterior de OCR permanece em `lib/quizvision` e `lib/sh`; não é o motor dos comandos atuais.
+O ambiente de uso validado é Linux com Hyprland e Vivaldi. Outros sistemas e navegadores não foram validados.
 
 ## Requisitos
 
@@ -12,8 +12,6 @@ O ambiente de uso validado é Linux com Hyprland e Vivaldi. Outros sistemas e na
 - Claude Code instalado e autenticado (`claude auth login`).
 - Playwright na versão declarada em `requirements.txt`.
 - Opcional: `notify-send` e um daemon de notificações; `wl-copy` para copiar a resposta; Hyprland para os atalhos fornecidos.
-
-OCR, Tesseract, ImageMagick, `grim`, `slurp`, `ydotool` e `/dev/uinput` pertencem ao modo legado. Não são necessários para responder pelo DOM.
 
 ## Instalação
 
@@ -100,7 +98,7 @@ A porta CDP permite controlar o perfil autenticado. Mesmo limitada ao loopback, 
 
 Se a autenticação do Claude expirar, pause o loop, execute `claude auth login` no terminal e repita `quiz-doctor`. Se a sessão do NetAcad expirar, entre novamente no perfil aberto por `quiz-browser`. Depois volte à atividade e retome manualmente.
 
-Mudanças no DOM do NetAcad, componentes não suportados, mais de uma aba compatível, navegação durante uma ação e respostas inválidas podem impedir o processamento. O helper não garante acerto das respostas. Apenas o fluxo DOM foi mantido como suíte padrão; os testes de replay antigos esperam opções removidas do lançador atual e ainda precisam de atualização.
+Mudanças no DOM do NetAcad, componentes não suportados, mais de uma aba compatível, navegação durante uma ação e respostas inválidas podem impedir o processamento. O helper não garante acerto das respostas.
 
 ## Testes locais
 
@@ -116,17 +114,6 @@ tests/run.sh
 A suíte padrão executa sintaxe Bash, ShellCheck, compilação Python, contrato, guarda, recuperação, erros do Claude, credenciais, permissões, CDP, lançador e instalação. Usa fixtures sintéticas, mocks dos comandos externos e HOME/configuração temporários. Não acessa conta real, não chama o Claude real e não usa o perfil do Vivaldi. O teste da guarda usa Chromium headless e um servidor HTTP em loopback; um sandbox que bloqueie sockets ou não tenha o navegador pode impedir essa parte.
 
 Para um venv de desenvolvimento alternativo: `QH_PYTHON=/caminho/do/venv/bin/python tests/run.sh`.
-
-A implementação e os testes legados continuam disponíveis:
-
-```bash
-tests/run.sh --legacy
-# Ou somente partes:
-tests/run.sh --legacy --only unit
-tests/run.sh --legacy --only input
-```
-
-O legado requer as ferramentas de OCR e pode apresentar falhas de compatibilidade com a configuração/CLI DOM. Não é executado pela CI padrão. O diagnóstico antigo foi preservado em `lib/sh/doctor-legacy.sh` para referência; contém verificações visuais e não tem as garantias do doctor DOM.
 
 A GitHub Action instala as ferramentas de teste e executa a mesma suíte sem conta real. A busca de credenciais em `tests/check_publication.py` detecta padrões comuns e arquivos cobertos pelo `.gitignore`; não substitui revisão humana do conteúdo ou histórico.
 

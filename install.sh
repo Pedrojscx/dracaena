@@ -30,7 +30,7 @@ check_deps() {
     python3 -c 'import sys, venv; sys.exit(sys.version_info < (3, 10))' || {
         say "Python 3.10+ com módulo venv é necessário."; return 1;
     }
-    say "Dependências DOM básicas: OK (OCR é apenas legado)."
+    say "Dependências DOM básicas: OK."
 }
 
 if [[ "${1:-}" == --check ]]; then
