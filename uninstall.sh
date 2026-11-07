@@ -14,7 +14,9 @@ if [[ -n "${XDG_RUNTIME_DIR:-}" && -r "$XDG_RUNTIME_DIR/quiz-helper/loop.pid" ]]
     "$REPO/bin/quiz-loop" --stop || true
 fi
 
-for c in quiz-loop quiz-ask quiz-doctor quiz-browser; do
+for src in "$REPO"/bin/*; do
+    [[ -f "$src" && -x "$src" ]] || continue
+    c="${src##*/}"
     dst="$HOME/.local/bin/$c"
     if [[ -L "$dst" && "$(readlink -f "$dst")" == "$REPO/bin/$c" ]]; then
         rm -f "$dst"

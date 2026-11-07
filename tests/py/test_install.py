@@ -51,8 +51,8 @@ class InstallTest(unittest.TestCase):
                     'XDG_DATA_HOME': str(self.root / 'data'), 'PATH': str(mocks) + ':' + os.environ['PATH'],
                     'INSTALL_CALLS': str(self.root / 'calls')}
 
-    def install(self):
-        return subprocess.run(['bash', str(self.repo / 'install.sh')], env=self.env, capture_output=True, text=True)
+    def install(self, *args):
+        return subprocess.run([shutil.which('bash'), str(self.repo / 'install.sh'), *args], env=self.env, capture_output=True, text=True)
 
     def test_clean_and_idempotent(self):
         for attempt in range(2):
@@ -63,7 +63,10 @@ class InstallTest(unittest.TestCase):
                 cfg.write_text('MODEL=personal-model\n')
             else:
                 self.assertEqual(cfg.read_text(), 'MODEL=personal-model\n')
-        for name in ('quiz-loop', 'quiz-ask', 'quiz-doctor', 'quiz-browser'):
+        for target in (self.repo / 'bin').iterdir():
+            if not target.is_file() or not os.access(target, os.X_OK):
+                continue
+            name = target.name
             self.assertEqual((self.root / 'home/.local/bin' / name).resolve(), self.repo / 'bin' / name)
         calls = [json.loads(line) for line in (self.root / 'calls').read_text().splitlines()]
         self.assertEqual(sum(args[:2] == ['-m', 'venv'] for args in calls), 1)
@@ -81,3 +84,59 @@ class InstallTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Falha ao instalar dependências declaradas', result.stdout)
         self.assertFalse((self.root / 'home/.local/bin/quiz-loop').exists())
+
+
+    def check_path(self, optional=(), missing=None):
+        directory = self.root / 'check-bin'
+        directory.mkdir()
+        for name in ('dirname', 'readlink', 'python3', 'curl', 'ss', 'flock', 'setsid'):
+            if name == missing:
+                continue
+            if name in ('dirname', 'readlink', 'python3'):
+                (directory / name).symlink_to(sys.executable if name == 'python3' else shutil.which(name))
+            else:
+                self.optional_command(directory / name)
+        for name in optional:
+            self.optional_command(directory / name)
+        self.env['PATH'] = str(directory)
+
+    def optional_command(self, path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('#!/bin/sh\nexit 0\n')
+        path.chmod(0o700)
+
+    def test_check_optional_missing_is_informational(self):
+        self.check_path()
+        result = self.install('--check')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in ('claude', 'vivaldi-stable', 'notify-send', 'wl-copy'):
+            self.assertIn(f'[OPCIONAL] {name} ausente', result.stdout)
+        self.assertFalse((self.root / 'data').exists())
+
+    def test_check_optional_present_and_browser_from_default_config(self):
+        cfg = self.repo / 'config/quiz-helper.conf'
+        cfg.write_text(cfg.read_text().replace('BROWSER_BIN=vivaldi-stable', 'BROWSER_BIN=test-browser'))
+        self.check_path(('claude', 'test-browser', 'notify-send', 'wl-copy'))
+        result = self.install('--check')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in ('claude', 'test-browser', 'notify-send', 'wl-copy'):
+            self.assertIn(f'[OK] {name}', result.stdout)
+        self.assertNotIn('[OPCIONAL]', result.stdout)
+
+    def test_check_finds_claude_in_usual_locations(self):
+        self.check_path()
+        for relative in ('.local/bin/claude', '.claude/local/claude'):
+            with self.subTest(location=relative):
+                path = self.root / 'home' / relative
+                self.optional_command(path)
+                result = self.install('--check')
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('[OK] claude', result.stdout)
+                path.unlink()
+
+    def test_check_required_dependency_missing_fails(self):
+        self.check_path(missing='curl')
+        result = self.install('--check')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('Dependências DOM ausentes: curl.', result.stdout)
+        self.assertFalse((self.root / 'data').exists())

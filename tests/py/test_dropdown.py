@@ -1,27 +1,11 @@
 """Dropdowns com ordem visual diferente dos índices internos, em Chromium local."""
-import unittest
-
-from playwright.sync_api import sync_playwright
-
 from quizhelper import dom
 from quizhelper.actions import Actor
 from quizhelper.guard import Guard
-from web import FixtureServer, launch
+from web import BrowserFixtureCase
 
 
-class DropdownTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.server = FixtureServer()
-        cls.pw = sync_playwright().start()
-        cls.browser = launch(cls.pw)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.browser.close()
-        cls.pw.stop()
-        cls.server.close()
-
+class DropdownTest(BrowserFixtureCase):
     def setUp(self):
         self.page = self.browser.new_page()
         self.addCleanup(self.page.close)

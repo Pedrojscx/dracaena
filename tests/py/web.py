@@ -12,6 +12,9 @@ import os
 import subprocess
 import sys
 import threading
+import unittest
+
+from playwright.sync_api import sync_playwright
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -77,3 +80,17 @@ class FixtureServer:
 def launch(p):
     """Chromium headless do Playwright (`playwright install --only-shell chromium`)."""
     return p.chromium.launch(headless=True, args=["--no-sandbox"] if os.geteuid() == 0 else [])
+
+
+class BrowserFixtureCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = FixtureServer()
+        cls.pw = sync_playwright().start()
+        cls.browser = launch(cls.pw)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.browser.close()
+        cls.pw.stop()
+        cls.server.close()

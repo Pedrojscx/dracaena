@@ -14,7 +14,6 @@ REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/quiz-helper"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/quiz-helper"
-COMMANDS=(quiz-loop quiz-ask quiz-doctor quiz-browser)
 
 say() { printf '%s\n' "$*"; }
 
@@ -33,9 +32,38 @@ check_deps() {
     say "Dependências DOM básicas: OK."
 }
 
+check_optional() {
+    local cmd candidate browser_bin="" key value claude_found=0
+    for candidate in "$(command -v claude 2>/dev/null || true)" "$HOME/.local/bin/claude" "$HOME/.claude/local/claude"; do
+        if [[ -f "$candidate" && -x "$candidate" ]]; then
+            claude_found=1
+            break
+        fi
+    done
+    if (( claude_found )); then
+        say "[OK] claude"
+    else
+        say "[OPCIONAL] claude ausente"
+    fi
+    while IFS='=' read -r key value; do
+        if [[ "$key" == BROWSER_BIN ]]; then
+            browser_bin="$value"
+            break
+        fi
+    done < "$REPO/config/quiz-helper.conf"
+    for cmd in "$browser_bin" notify-send wl-copy; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            say "[OK] $cmd"
+        else
+            say "[OPCIONAL] $cmd ausente"
+        fi
+    done
+}
+
 if [[ "${1:-}" == --check ]]; then
-    check_deps
-    exit $?
+    check_deps || exit 1
+    check_optional
+    exit 0
 fi
 
 check_deps || exit 1
@@ -52,8 +80,9 @@ say "Python DOM instalado em $VENV; nenhum navegador foi instalado."
 
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$DATA_DIR"
 
-for c in "${COMMANDS[@]}"; do
-    src="$REPO/bin/$c"
+for src in "$REPO"/bin/*; do
+    [[ -f "$src" && -x "$src" ]] || continue
+    c="${src##*/}"
     dst="$BIN_DIR/$c"
     chmod +x "$src"
     if [[ -L "$dst" ]]; then
