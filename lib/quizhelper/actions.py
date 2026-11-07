@@ -40,6 +40,8 @@ class Actor:
         return dom.extract(host)
 
     def _confirm(self, host, ok: Callable[[dict], bool]) -> bool:
+        if self.guard.dry_run:
+            return True
         return bool(wait_for(lambda: ok(self._q(host)), self.verify_s, self.abort))
 
     def apply(self, host, q: dict, ans: dict) -> list[str]:
