@@ -52,16 +52,6 @@ say "Python DOM instalado em $VENV; nenhum navegador foi instalado."
 
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$DATA_DIR"
 
-# Remove symlinks de comandos que deixaram de existir (ex.: quiz-calibrate).
-for dst in "$BIN_DIR"/quiz-*; do
-    [[ -L "$dst" ]] || continue
-    target="$(readlink "$dst")"
-    if [[ "$target" == "$REPO/bin/"* && ! -e "$target" ]]; then
-        rm -f "$dst"
-        say "symlink obsoleto removido: $dst"
-    fi
-done
-
 for c in "${COMMANDS[@]}"; do
     src="$REPO/bin/$c"
     dst="$BIN_DIR/$c"
