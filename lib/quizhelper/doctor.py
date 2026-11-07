@@ -90,5 +90,4 @@ def run() -> int:
             # Sair do Playwright desconecta o cliente; não fecha o navegador do usuário.
     except Exception:
         report(False, "conexão, aba ou iframe indisponível (dados omitidos)", "abra a atividade no quiz-browser e faça login no NetAcad")
-    print("OCR/Tesseract/grim/slurp/ydotool: dependências do modo legado, não exigidas pelo DOM.")
     return int(failures > 0)

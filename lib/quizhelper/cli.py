@@ -68,7 +68,7 @@ ENV_SAMPLES = {
                 "options": [{"index": i, "text": str(n)} for i, n in enumerate((5, 7, 12, 18, 19, 20))],
                 "expect": [4]},
 }
-ENV_KEYS = ("CLAUDE_CODE_TMPDIR", "YDOTOOL_SOCKET", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HOME",
+ENV_KEYS = ("CLAUDE_CODE_TMPDIR", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HOME",
             "WAYLAND_DISPLAY", "DISPLAY", "SHELL", "LANG", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
             "CLAUDE_CONFIG_DIR", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
 

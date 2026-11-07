@@ -30,7 +30,7 @@ check_deps() {
     python3 -c 'import sys, venv; sys.exit(sys.version_info < (3, 10))' || {
         say "Python 3.10+ com módulo venv é necessário."; return 1;
     }
-    say "Dependências DOM básicas: OK (OCR é apenas legado)."
+    say "Dependências DOM básicas: OK."
 }
 
 if [[ "${1:-}" == --check ]]; then
@@ -51,16 +51,6 @@ fi
 say "Python DOM instalado em $VENV; nenhum navegador foi instalado."
 
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$DATA_DIR"
-
-# Remove symlinks de comandos que deixaram de existir (ex.: quiz-calibrate).
-for dst in "$BIN_DIR"/quiz-*; do
-    [[ -L "$dst" ]] || continue
-    target="$(readlink "$dst")"
-    if [[ "$target" == "$REPO/bin/"* && ! -e "$target" ]]; then
-        rm -f "$dst"
-        say "symlink obsoleto removido: $dst"
-    fi
-done
 
 for c in "${COMMANDS[@]}"; do
     src="$REPO/bin/$c"

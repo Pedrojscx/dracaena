@@ -72,30 +72,6 @@ qh_load_config() {
     fi
 }
 
-# Caminho absoluto do claude: config/instalação, depois PATH, depois locais comuns.
-qh_claude_bin() {
-    local c
-    for c in "${CFG_CLAUDE_BIN:-}" "$(command -v claude 2>/dev/null)" "$HOME/.local/bin/claude" \
-             "$HOME/.claude/local/claude" /usr/bin/claude; do
-        if [[ -n "$c" && -x "$c" ]]; then
-            printf '%s\n' "$c"
-            return 0
-        fi
-    done
-    return 1
-}
-
-qh_ms_sleep() {
-    local ms="${1:-0}"
-    (( ms > 0 )) || return 0
-    sleep "$(awk -v m="$ms" 'BEGIN { printf "%.3f", m / 1000 }')"
-}
-
-qh_now_ms() {
-    local us="${EPOCHREALTIME/[.,]/}"
-    printf '%s\n' "$(( us / 1000 ))"
-}
-
 qh_require() {
     local missing=() cmd
     for cmd in "$@"; do
