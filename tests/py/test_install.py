@@ -63,7 +63,10 @@ class InstallTest(unittest.TestCase):
                 cfg.write_text('MODEL=personal-model\n')
             else:
                 self.assertEqual(cfg.read_text(), 'MODEL=personal-model\n')
-        for name in ('quiz-loop', 'quiz-ask', 'quiz-doctor', 'quiz-browser'):
+        for target in (self.repo / 'bin').iterdir():
+            if not target.is_file() or not os.access(target, os.X_OK):
+                continue
+            name = target.name
             self.assertEqual((self.root / 'home/.local/bin' / name).resolve(), self.repo / 'bin' / name)
         calls = [json.loads(line) for line in (self.root / 'calls').read_text().splitlines()]
         self.assertEqual(sum(args[:2] == ['-m', 'venv'] for args in calls), 1)

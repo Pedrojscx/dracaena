@@ -38,8 +38,10 @@ def run() -> int:
     report(True, "configuração")
     for name in ("system", "answer", "retry", "invalid"):
         report((config.REPO / "prompts" / f"{name}.txt").is_file(), f"prompt {name}")
-    for name in ("quiz-loop", "quiz-ask", "quiz-doctor", "quiz-browser"):
-        target = config.REPO / "bin" / name
+    for target in sorted((config.REPO / "bin").iterdir()):
+        if not target.is_file():
+            continue
+        name = target.name
         link = Path.home() / ".local/bin" / name
         report(target.is_file() and os.access(target, os.X_OK), f"comando {name}")
         report(link.is_symlink() and link.resolve() == target, f"symlink {name}", "execute ./install.sh")

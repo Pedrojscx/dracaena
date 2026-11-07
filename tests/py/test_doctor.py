@@ -2,6 +2,7 @@
 import contextlib
 import io
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,8 +19,11 @@ class DoctorTest(unittest.TestCase):
             root = Path(tmp)
             for folder in ('bin', 'prompts', 'home/.local/bin', 'data/vivaldi-profile'):
                 (root / folder).mkdir(parents=True)
-            for name in ('quiz-loop', 'quiz-ask', 'quiz-doctor', 'quiz-browser'):
-                target = root / 'bin' / name
+            shutil.copytree(doctor.config.REPO / 'bin', root / 'bin', dirs_exist_ok=True)
+            for target in (root / 'bin').iterdir():
+                if not target.is_file():
+                    continue
+                name = target.name
                 target.write_text('synthetic command')
                 target.chmod(0o700)
                 (root / 'home/.local/bin' / name).symlink_to(target)

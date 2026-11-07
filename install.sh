@@ -14,7 +14,6 @@ REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/quiz-helper"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/quiz-helper"
-COMMANDS=(quiz-loop quiz-ask quiz-doctor quiz-browser)
 
 say() { printf '%s\n' "$*"; }
 
@@ -52,8 +51,9 @@ say "Python DOM instalado em $VENV; nenhum navegador foi instalado."
 
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$DATA_DIR"
 
-for c in "${COMMANDS[@]}"; do
-    src="$REPO/bin/$c"
+for src in "$REPO"/bin/*; do
+    [[ -f "$src" && -x "$src" ]] || continue
+    c="${src##*/}"
     dst="$BIN_DIR/$c"
     chmod +x "$src"
     if [[ -L "$dst" ]]; then
