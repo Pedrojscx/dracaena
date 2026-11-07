@@ -32,9 +32,38 @@ check_deps() {
     say "Dependências DOM básicas: OK."
 }
 
+check_optional() {
+    local cmd candidate browser_bin="" key value claude_found=0
+    for candidate in "$(command -v claude 2>/dev/null || true)" "$HOME/.local/bin/claude" "$HOME/.claude/local/claude"; do
+        if [[ -f "$candidate" && -x "$candidate" ]]; then
+            claude_found=1
+            break
+        fi
+    done
+    if (( claude_found )); then
+        say "[OK] claude"
+    else
+        say "[OPCIONAL] claude ausente"
+    fi
+    while IFS='=' read -r key value; do
+        if [[ "$key" == BROWSER_BIN ]]; then
+            browser_bin="$value"
+            break
+        fi
+    done < "$REPO/config/quiz-helper.conf"
+    for cmd in "$browser_bin" notify-send wl-copy; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            say "[OK] $cmd"
+        else
+            say "[OPCIONAL] $cmd ausente"
+        fi
+    done
+}
+
 if [[ "${1:-}" == --check ]]; then
-    check_deps
-    exit $?
+    check_deps || exit 1
+    check_optional
+    exit 0
 fi
 
 check_deps || exit 1

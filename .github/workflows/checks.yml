@@ -8,13 +8,16 @@ jobs:
   dom:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.14']
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
         with:
-          python-version: '3.14'
+          python-version: ${{ matrix.python-version }}
       - name: Install test tools
         run: |
           sudo apt-get update
