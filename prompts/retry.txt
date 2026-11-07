@@ -1,0 +1,8 @@
+Leia a imagem em {IMAGE}. Ela mostra uma questão de um curso Cisco (IT Essentials) já respondida e o feedback do NetAcad indicando que a resposta anterior estava errada. A resposta anterior foi:
+{PREVIOUS}
+Use o feedback para corrigir. Responda APENAS com um JSON válido, sem texto fora dele, no mesmo formato da resposta anterior, copiando os textos exatamente como aparecem na imagem:
+- Alternativa única: {"type":"SINGLE","answers":["<texto da alternativa correta>"]}
+- Múltipla seleção: {"type":"MULTI","expected":<quantidade pedida>,"answers":["<texto>","<texto>"]}
+- Dropdown por item: {"type":"DROPDOWN","items":[{"statement":"<texto do item>","answer":"<opção exata>"}]} na ordem da tela, de cima para baixo.
+- Associação de colunas: {"type":"MATCH","pairs":[{"left":"<texto do item da esquerda>","letter":"<letra do círculo da esquerda>","right":"<texto do item da direita>"}]} com um par por item da direita.
+- Se a imagem não mostrar a questão inteira: {"type":"INCOMPLETE"}.

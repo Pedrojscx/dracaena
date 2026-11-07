@@ -1,0 +1,117 @@
+{
+  "description": "DROPDOWN: abre cada lista, escolhe a opção exata, confere o valor exibido.",
+  "start": "d",
+  "states": {
+    "d": {
+      "image": "dropdown"
+    },
+    "d_open0": {
+      "image": "dropdown_open0"
+    },
+    "d1": {
+      "image": "dropdown_v1"
+    },
+    "d1_open1": {
+      "image": "dropdown_v1_open1"
+    },
+    "d2": {
+      "image": "dropdown_v2"
+    },
+    "d2_open2": {
+      "image": "dropdown_v2_open2"
+    },
+    "d_done": {
+      "image": "dropdown_done"
+    },
+    "end": {
+      "image": "final"
+    }
+  },
+  "transitions": [
+    {
+      "from": "d",
+      "on": "click",
+      "target": "dd0",
+      "to": "d_open0"
+    },
+    {
+      "from": "d_open0",
+      "on": "click",
+      "target": "list_1",
+      "to": "d1"
+    },
+    {
+      "from": "d1",
+      "on": "click",
+      "target": "dd1",
+      "to": "d1_open1"
+    },
+    {
+      "from": "d1_open1",
+      "on": "click",
+      "target": "list_2",
+      "to": "d2"
+    },
+    {
+      "from": "d2",
+      "on": "click",
+      "target": "dd2",
+      "to": "d2_open2"
+    },
+    {
+      "from": "d2_open2",
+      "on": "click",
+      "target": "list_1",
+      "to": "d_done"
+    },
+    {
+      "from": "d_done",
+      "on": "next",
+      "to": "end"
+    }
+  ],
+  "claude": [
+    {
+      "type": "DROPDOWN",
+      "items": [
+        {
+          "statement": "A UPS protects a computer against power outages.",
+          "answer": "True"
+        },
+        {
+          "statement": "Thermal paste is applied between the CPU and the RAM.",
+          "answer": "False"
+        },
+        {
+          "statement": "An ESD strap should be connected to the computer chassis.",
+          "answer": "True"
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "reason": "end_screen",
+    "stats": {
+      "auto": 1,
+      "manual": 0
+    },
+    "claude_calls": 1,
+    "visited": [
+      "d_open0",
+      "d1",
+      "d1_open1",
+      "d2",
+      "d2_open2",
+      "d_done",
+      "end"
+    ],
+    "log_contains": [
+      "dropdown 1 confirmado",
+      "dropdown 3 confirmado"
+    ]
+  },
+  "window_at": [
+    2600,
+    30
+  ]
+}

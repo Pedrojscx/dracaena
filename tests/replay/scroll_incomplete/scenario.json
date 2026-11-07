@@ -1,0 +1,64 @@
+{
+  "description": "Questão maior que o painel: Claude responde INCOMPLETE, o loop rola, envia as duas capturas e responde na parte de baixo.",
+  "start": "top",
+  "states": {
+    "top": {
+      "image": "long_top"
+    },
+    "bottom": {
+      "image": "long_bottom"
+    },
+    "bottom_sel": {
+      "image": "long_bottom_selected"
+    },
+    "end": {
+      "image": "final"
+    }
+  },
+  "transitions": [
+    {
+      "from": "top",
+      "on": "scroll",
+      "dir": "down",
+      "to": "bottom"
+    },
+    {
+      "from": "bottom",
+      "on": "click",
+      "target": "opt2",
+      "to": "bottom_sel"
+    },
+    {
+      "from": "bottom_sel",
+      "on": "next",
+      "to": "end"
+    }
+  ],
+  "claude": [
+    {
+      "type": "INCOMPLETE"
+    },
+    {
+      "type": "SINGLE",
+      "answers": [
+        "To keep the system clock running while the computer is off"
+      ]
+    }
+  ],
+  "expect": {
+    "reason": "end_screen",
+    "stats": {
+      "auto": 1,
+      "manual": 0
+    },
+    "claude_calls": 2,
+    "visited": [
+      "bottom",
+      "bottom_sel",
+      "end"
+    ],
+    "log_contains": [
+      "rolagem para baixo"
+    ]
+  }
+}

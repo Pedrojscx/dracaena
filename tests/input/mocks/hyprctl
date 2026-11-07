@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Mock do hyprctl. MOCK_HYPR_STYLE: lua (hyprland.lua) | legacy (hyprland.conf)
+# | none (recusa as duas sintaxes).
+echo "hyprctl $*" >> "$MOCK_DIR/calls.log"
+case "$1" in
+    cursorpos) echo "${MOCK_CURSOR:-100, 200}"; exit 0 ;;
+    dispatch)
+        shift
+        if [[ "${MOCK_HYPR_STYLE:-lua}" == none ]]; then echo "error: dispatcher indisponível"; exit 1; fi
+        if [[ "${MOCK_HYPR_STYLE:-lua}" == lua ]]; then
+            if [[ "$1" == hl.dsp.* ]]; then echo ok; exit 0; fi
+            echo "error: [string \"return hl.dispatch($*)\"]:1: ')' expected near '${2:-}'"
+            exit 7
+        fi
+        if [[ "$1" == hl.dsp.* ]]; then echo "Invalid dispatcher"; exit 1; fi
+        echo ok; exit 0 ;;
+esac
+exit 0

@@ -1,0 +1,108 @@
+{
+  "description": "MATCH variante Categories/Options: o arrasto não funciona, o loop troca para clique e mantém o modo.",
+  "start": "c",
+  "states": {
+    "c": {
+      "image": "match_categories"
+    },
+    "c1": {
+      "image": "match_categories_1"
+    },
+    "c2": {
+      "image": "match_categories_2"
+    },
+    "c3": {
+      "image": "match_categories_3"
+    },
+    "c_done": {
+      "image": "match_categories_done"
+    },
+    "end": {
+      "image": "final"
+    }
+  },
+  "transitions": [
+    {
+      "from": "c",
+      "on": "pair",
+      "source": "LA",
+      "target": "T0",
+      "to": "c1"
+    },
+    {
+      "from": "c1",
+      "on": "pair",
+      "source": "LB",
+      "target": "T1",
+      "to": "c2"
+    },
+    {
+      "from": "c2",
+      "on": "pair",
+      "source": "LA",
+      "target": "T2",
+      "to": "c3"
+    },
+    {
+      "from": "c3",
+      "on": "pair",
+      "source": "LB",
+      "target": "T3",
+      "to": "c_done"
+    },
+    {
+      "from": "c_done",
+      "on": "next",
+      "to": "end"
+    }
+  ],
+  "config": {
+    "MATCH_MODE": "drag"
+  },
+  "claude": [
+    {
+      "type": "MATCH",
+      "pairs": [
+        {
+          "left": "Input device",
+          "letter": "A",
+          "right": "Scanner"
+        },
+        {
+          "left": "Output device",
+          "letter": "B",
+          "right": "Printer"
+        },
+        {
+          "left": "Input device",
+          "letter": "A",
+          "right": "Microphone"
+        },
+        {
+          "left": "Output device",
+          "letter": "B",
+          "right": "Projector"
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "reason": "end_screen",
+    "stats": {
+      "auto": 1,
+      "manual": 0
+    },
+    "claude_calls": 1,
+    "visited": [
+      "c1",
+      "c2",
+      "c3",
+      "c_done",
+      "end"
+    ],
+    "log_contains": [
+      "tentando click",
+      "par 4 ligado (click)"
+    ]
+  }
+}

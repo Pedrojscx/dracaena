@@ -1,0 +1,100 @@
+{
+  "description": "Feedback incorreto: consulta de novo com a captura do feedback, usa Reset e refaz uma vez.",
+  "start": "q",
+  "states": {
+    "q": {
+      "image": "single"
+    },
+    "q_sel1": {
+      "image": "single_sel1"
+    },
+    "q_bad": {
+      "image": "single_incorrect"
+    },
+    "q_sel2": {
+      "image": "single_selected"
+    },
+    "q_ok": {
+      "image": "single_correct"
+    },
+    "end": {
+      "image": "final"
+    }
+  },
+  "transitions": [
+    {
+      "from": "q",
+      "on": "click",
+      "target": "opt1",
+      "to": "q_sel1"
+    },
+    {
+      "from": "q_sel1",
+      "on": "click",
+      "target": "submit",
+      "to": "q_bad"
+    },
+    {
+      "from": "q_bad",
+      "on": "click",
+      "target": "extra",
+      "to": "q"
+    },
+    {
+      "from": "q",
+      "on": "click",
+      "target": "opt2",
+      "to": "q_sel2"
+    },
+    {
+      "from": "q_sel2",
+      "on": "click",
+      "target": "submit",
+      "to": "q_ok"
+    },
+    {
+      "from": "q_ok",
+      "on": "next",
+      "to": "end"
+    }
+  ],
+  "claude": [
+    {
+      "type": "SINGLE",
+      "answers": [
+        "Hard disk drive"
+      ]
+    },
+    {
+      "type": "SINGLE",
+      "answers": [
+        "Power supply unit"
+      ]
+    }
+  ],
+  "expect": {
+    "reason": "end_screen",
+    "stats": {
+      "auto": 1,
+      "retry": 1,
+      "failed": 0,
+      "manual": 0
+    },
+    "claude_calls": 2,
+    "visited": [
+      "q_bad",
+      "q_sel2",
+      "q_ok",
+      "end"
+    ],
+    "log_contains": [
+      "feedback: incorrect",
+      "usando botão 'Reset'",
+      "feedback: correct"
+    ]
+  },
+  "window_at": [
+    37,
+    812
+  ]
+}

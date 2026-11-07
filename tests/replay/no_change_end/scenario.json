@@ -1,0 +1,47 @@
+{
+  "description": "Depois de avançar a página não muda: espera ADVANCE_TIMEOUT e encerra.",
+  "start": "q",
+  "states": {
+    "q": {
+      "image": "single"
+    },
+    "q_sel": {
+      "image": "single_selected"
+    },
+    "q_ok": {
+      "image": "single_correct"
+    }
+  },
+  "transitions": [
+    {
+      "from": "q",
+      "on": "click",
+      "target": "opt2",
+      "to": "q_sel"
+    },
+    {
+      "from": "q_sel",
+      "on": "click",
+      "target": "submit",
+      "to": "q_ok"
+    }
+  ],
+  "config": {
+    "ADVANCE_TIMEOUT": 2
+  },
+  "claude": [
+    {
+      "type": "SINGLE",
+      "answers": [
+        "Power supply unit"
+      ]
+    }
+  ],
+  "expect": {
+    "reason": "no_change",
+    "stats": {
+      "auto": 1
+    },
+    "claude_calls": 1
+  }
+}

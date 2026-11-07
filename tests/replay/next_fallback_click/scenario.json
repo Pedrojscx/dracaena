@@ -1,0 +1,98 @@
+{
+  "start": "q",
+  "states": {
+    "q": {
+      "image": "single",
+      "variant": "none"
+    },
+    "q_sel": {
+      "image": "single_selected",
+      "variant": "none"
+    },
+    "q_ok": {
+      "image": "single_correct",
+      "variant": "none"
+    },
+    "q2": {
+      "image": "single_q7"
+    },
+    "q2_sel": {
+      "image": "single_q7_selected"
+    },
+    "end": {
+      "image": "final"
+    }
+  },
+  "transitions": [
+    {
+      "from": "q",
+      "on": "click",
+      "target": "opt2",
+      "to": "q_sel"
+    },
+    {
+      "from": "q_sel",
+      "on": "click",
+      "target": "submit",
+      "to": "q_ok"
+    },
+    {
+      "from": "q_ok",
+      "on": "next",
+      "to": "q2"
+    },
+    {
+      "from": "q2",
+      "on": "click",
+      "target": "opt2",
+      "to": "q2_sel"
+    },
+    {
+      "from": "q2_sel",
+      "on": "next",
+      "to": "end"
+    }
+  ],
+  "claude": [
+    {
+      "type": "SINGLE",
+      "answers": [
+        "Power supply unit"
+      ]
+    },
+    {
+      "type": "SINGLE",
+      "answers": [
+        "Power supply unit"
+      ]
+    }
+  ],
+  "description": "Tela sem seta detectável: o loop pede um clique na seta, usa o ponto e, na questão seguinte (com seta), volta a detectar sozinho.",
+  "window_at": [
+    300,
+    120
+  ],
+  "manual_next": [
+    1300,
+    500
+  ],
+  "expect": {
+    "reason": "end_screen",
+    "stats": {
+      "auto": 2,
+      "manual": 0
+    },
+    "claude_calls": 2,
+    "visited": [
+      "q_ok",
+      "q2",
+      "q2_sel",
+      "end"
+    ],
+    "log_contains": [
+      "seta de avançar não encontrada",
+      "seta informada pelo usuário",
+      "seta de avançar: barra de questões"
+    ]
+  }
+}

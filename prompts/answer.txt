@@ -1,0 +1,7 @@
+Leia a imagem em {IMAGE}. Ela mostra uma questão de um curso Cisco (IT Essentials). Responda APENAS com um JSON válido, sem texto fora dele, em um destes formatos, copiando os textos exatamente como aparecem na imagem:
+- Alternativa única: {"type":"SINGLE","answers":["<texto da alternativa correta>"]}
+- Múltipla seleção: {"type":"MULTI","expected":<quantidade pedida>,"answers":["<texto>","<texto>"]}
+- Dropdown por item (verdadeiro/falso ou qualquer lista de opções): {"type":"DROPDOWN","items":[{"statement":"<texto do item>","answer":"<opção exata>"}]} na ordem da tela, de cima para baixo.
+- Associação de colunas: {"type":"MATCH","pairs":[{"left":"<texto do item da esquerda>","letter":"<letra do círculo da esquerda>","right":"<texto do item da direita>"}]} com um par por item da direita.
+- Se a imagem não mostrar a questão inteira (alternativas ou itens cortados): {"type":"INCOMPLETE"}.
+Na resposta de retry após erro, a imagem incluirá o feedback do NetAcad; use-o para corrigir.

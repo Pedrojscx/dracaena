@@ -1,0 +1,25 @@
+# Imagens e caches gerados pelos testes
+tests/fixtures/out/
+*.page.json
+*.ocr.json
+
+# Capturas, logs e saídas de execução (nunca versionar prints de tela)
+*.png
+*.ppm
+*.log
+runs/
+
+# Configuração pessoal
+config.local
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Editor/ferramentas locais
+.claude/
+.vscode/
+.idea/
+*.swp
