@@ -192,7 +192,7 @@ _EXTRACT = js(r"""
       const s = d.shadowRoot; const title = s.querySelector('.matching__item-title_inner .matching__item-title_inner') || s.querySelector('.matching__item-title');
       const opts = Array.from(s.querySelectorAll('li[role=option]')).map(li => ({index: +li.dataset.index,
         text: QH.norm(Array.from(li.querySelector('.dropdown__item-inner').childNodes).filter(n => n.nodeType === 3).map(n => n.textContent).join(' ')),
-        selected: li.getAttribute('aria-selected') === 'true'}));
+        selected: li.getAttribute('aria-selected') === 'true'})).sort((a, b) => a.index - b.index);
       const btn = s.querySelector('button.dropdown__btn');
       return {index: idx, text: title ? QH.text(title) : '', options: opts,
               shown: btn ? QH.text(btn.querySelector('.dropdown__inner') || btn) : ''};

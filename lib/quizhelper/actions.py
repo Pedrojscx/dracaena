@@ -72,7 +72,8 @@ class Actor:
                 for attempt in (1, 2):
                     self.guard.click(dom.element(self.frame, host, "dd-button", index=i), host, f"abrir dropdown [{i}]")
                     self.guard.click(dom.element(self.frame, host, "dd-option", index=i, option=o), host, label)
-                    if self._confirm(host, lambda s, i=i, o=o: s["items"][i]["options"][o]["selected"]):
+                    if self._confirm(host, lambda s, i=i, o=o: s["items"][i]["options"][o]["selected"] or
+                                     s["items"][i]["shown"] == s["items"][i]["options"][o]["text"]):
                         break
                     if attempt == 2:
                         raise Pause(f"dropdown [{i}] não mostra a opção escolhida")
