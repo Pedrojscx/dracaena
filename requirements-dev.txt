@@ -1,0 +1,3 @@
+# unittest faz parte do Python. ShellCheck é ferramenta do sistema.
+# O Chromium de teste é instalado explicitamente, nunca pelo install.sh.
+-r requirements.txt

@@ -5,37 +5,32 @@
 #                           (sem sobrescrever) e fixa o caminho do claude
 #   ./install.sh --check    só verifica as dependências
 #
-# Não instala pacotes, não usa sudo e não edita o hyprland.conf: lista o que
-# falta com o comando pacman correspondente e mostra as linhas dos atalhos.
+# Instala apenas dependências Python declaradas no venv privado.
+# Não instala pacotes do sistema nem navegador; não edita o Hyprland.
 set -euo pipefail
+umask 077
 
 REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/quiz-helper"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/quiz-helper"
-COMMANDS=(quiz-loop quiz-ask quiz-doctor)
+COMMANDS=(quiz-loop quiz-ask quiz-doctor quiz-browser)
 
 say() { printf '%s\n' "$*"; }
 
 check_deps() {
-    local -A pkg=(
-        [grim]=grim [slurp]=slurp [tesseract]=tesseract [magick]=imagemagick [ydotool]=ydotool
-        [notify-send]=libnotify [wl-copy]=wl-clipboard [jq]=jq [python3]=python [gdbus]=glib2
-        [hyprctl]=hyprland [flock]=util-linux
-    )
     local missing=() cmd
-    for cmd in "${!pkg[@]}"; do
-        command -v "$cmd" > /dev/null 2>&1 || missing+=("${pkg[$cmd]}")
+    for cmd in python3 curl ss flock setsid; do
+        command -v "$cmd" > /dev/null 2>&1 || missing+=("$cmd")
     done
-    if command -v tesseract > /dev/null 2>&1 && ! tesseract --list-langs 2> /dev/null | grep -qx eng; then
-        missing+=(tesseract-data-eng)
-    fi
     if (( ${#missing[@]} )); then
-        say "Dependências faltando. Instale com:"
-        say "  sudo pacman -S --needed $(printf '%s\n' "${missing[@]}" | sort -u | tr '\n' ' ')"
+        say "Dependências DOM ausentes: ${missing[*]}. Instale pelo gerenciador do sistema."
         return 1
     fi
-    say "Dependências: OK"
+    python3 -c 'import sys, venv; sys.exit(sys.version_info < (3, 10))' || {
+        say "Python 3.10+ com módulo venv é necessário."; return 1;
+    }
+    say "Dependências DOM básicas: OK (OCR é apenas legado)."
 }
 
 if [[ "${1:-}" == --check ]]; then
@@ -43,8 +38,17 @@ if [[ "${1:-}" == --check ]]; then
     exit $?
 fi
 
-deps_ok=1
-check_deps || deps_ok=0
+check_deps || exit 1
+
+VENV="$DATA_DIR/venv"
+if [[ ! -x "$VENV/bin/python" ]]; then
+    python3 -m venv "$VENV" || { say "Falha ao criar venv: $VENV. Instale o suporte a venv do Python."; exit 1; }
+fi
+if ! "$VENV/bin/python" -m pip install --disable-pip-version-check -r "$REPO/requirements.txt"; then
+    say "Falha ao instalar dependências declaradas. Verifique a rede/índice pip e execute install.sh novamente."
+    exit 1
+fi
+say "Python DOM instalado em $VENV; nenhum navegador foi instalado."
 
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$DATA_DIR"
 
@@ -120,6 +124,6 @@ Config clássica (hyprland.conf):
 
 $(sed 's/^/  /' "$REPO/config/hyprland-binds.conf" | grep -v '^  #')
 
-Próximos passos: quiz-doctor com um quiz aberto no Vivaldi, depois quiz-loop --dry-run.
+Próximos passos: quiz-browser, login no NetAcad, abra uma atividade e rode quiz-doctor.
+O Chromium do Playwright é opcional e usado somente nos testes da guarda.
 MSG
-(( deps_ok )) || exit 1

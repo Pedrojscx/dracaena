@@ -52,7 +52,7 @@ if [[ "$want_claude" == --claude ]]; then
     if bin="$(qh_claude_bin)"; then
         qh_claude_env
         work="$(mktemp -d)"
-        ans="$(cd "$work" && timeout 90 "$bin" -p --model "${CFG_MODEL:-sonnet}" --tools "" --strict-mcp-config \
+        ans="$(cd "$work" && timeout 90 "$bin" -p --model "${CFG_MODEL:-haiku}" --tools "" --strict-mcp-config \
             --disable-slash-commands --no-session-persistence --output-format text \
             "Responda apenas com a palavra ok." 2> "$work/err" < /dev/null)"
         rc=$?

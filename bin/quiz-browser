@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# quiz-browser: abre o Vivaldi com depuração remota (Chrome DevTools Protocol)
+# só em 127.0.0.1, num perfil dedicado do quiz-helper.
+#
+#   quiz-browser [URL]     abre (ou reaproveita) o Vivaldi do quiz-helper
+#   quiz-browser --status  mostra se a porta está aberta e em qual endereço
+#
+# O Chromium 136+ (o Vivaldi 8.x usa o Chromium 152) ignora a depuração
+# remota no perfil padrão, então o perfil é separado:
+#   ${XDG_DATA_HOME:-~/.local/share}/quiz-helper/vivaldi-profile
+# Faça login no NetAcad uma vez nesse perfil; a sessão fica salva nele.
+# A porta nunca escuta fora de 127.0.0.1: se escutar, o navegador é fechado.
+set -uo pipefail
+
+QH_REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# shellcheck source=../lib/sh/common.sh
+source "$QH_REPO/lib/sh/common.sh"
+
+qh_load_config
+qh_require ss curl setsid
+PORT="${CFG_CDP_PORT:-9222}"
+PROFILE="$QH_DATA_DIR/vivaldi-profile"
+BIN="${CFG_BROWSER_BIN:-vivaldi-stable}"
+
+usage() { sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+# Endereços em que a porta escuta (um por linha), ex.: 127.0.0.1:9222
+listening() {
+    ss -Hltn "sport = :$PORT" 2> /dev/null | awk '{print $4}'
+}
+
+# 0 = só loopback; 1 = nada escutando; 2 = escutando fora do loopback
+check_loopback() {
+    local addrs a
+    addrs="$(listening)"
+    [[ -n "$addrs" ]] || return 1
+    while read -r a; do
+        [[ "$a" == 127.0.0.1:"$PORT" ]] || return 2
+    done <<< "$addrs"
+    return 0
+}
+
+valid_cdp() {
+    PYTHONPATH="$QH_REPO/lib" "$QH_PYTHON" -m quizhelper.cdp "$PORT"
+}
+
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    --status)
+        check_loopback
+        case $? in
+            0) valid_cdp || exit 1; echo "CDP em 127.0.0.1:$PORT (perfil $PROFILE)"; exit 0 ;;
+            1) echo "CDP fechado (porta $PORT sem escuta)"; exit 1 ;;
+            *) echo "PERIGO: a porta $PORT escuta fora do loopback: $(listening | tr '\n' ' ')"; exit 2 ;;
+        esac ;;
+    -*) usage >&2; exit 2 ;;
+esac
+
+URL="${1:-https://www.netacad.com/}"
+
+check_loopback
+state=$?
+if (( state == 0 )); then
+    valid_cdp || qh_die "a porta $PORT está ocupada por serviço que não é CDP"
+    # Já aberto: só abre a URL numa aba do mesmo navegador.
+    curl -fs --max-time 3 -X PUT "http://127.0.0.1:$PORT/json/new?$URL" > /dev/null ||
+        qh_warn "Vivaldi do quiz-helper já aberto, mas não consegui abrir a aba"
+    exit 0
+fi
+case "$state" in
+    2) qh_die "a porta $PORT já escuta fora do loopback ($(listening | tr '\n' ' ')); recusando" ;;
+esac
+
+command -v "$BIN" > /dev/null || qh_die "navegador não encontrado: $BIN (CFG BROWSER_BIN)"
+mkdir -p "$PROFILE"
+setsid "$BIN" --user-data-dir="$PROFILE" --remote-debugging-port="$PORT" \
+    --remote-debugging-address=127.0.0.1 --no-first-run --no-default-browser-check \
+    "$URL" > /dev/null 2>&1 < /dev/null &
+pid=$!
+
+for _ in $(seq 50); do
+    check_loopback
+    rc=$?
+    (( rc == 0 )) && valid_cdp && { echo "Vivaldi do quiz-helper aberto: CDP em 127.0.0.1:$PORT"; exit 0; }
+    if (( rc == 2 )); then
+        kill "$pid" 2> /dev/null
+        qh_die "a porta $PORT escutou fora do loopback; navegador fechado"
+    fi
+    sleep 0.2
+done
+qh_die "o Vivaldi não abriu a porta $PORT em 10 s (outro Vivaldi com este perfil já aberto sem depuração?)"

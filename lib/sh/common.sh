@@ -1,11 +1,14 @@
 # shellcheck shell=bash
-# Base compartilhada: caminhos, configuração, log e chamada ao quizvision.
+# Base compartilhada: caminhos, configuração e chamada ao pacote quizhelper (Python do venv).
 # Uso: QH_REPO definido pelo script chamador antes de `source`.
 
 : "${QH_REPO:?QH_REPO não definido}"
 
 # Números sempre com ponto decimal (printf/awk/sleep), seja qual for o locale.
 export LC_NUMERIC=C
+
+# Somente novas pastas/arquivos: dados locais privados por padrão.
+umask 077
 
 QH_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/quiz-helper"
 QH_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/quiz-helper"
@@ -18,7 +21,8 @@ QH_DEFAULT_CONFIG="$QH_REPO/config/quiz-helper.conf"
 QH_USER_CONFIG="$QH_CONFIG_DIR/config"
 QH_PATHS_FILE="$QH_CONFIG_DIR/paths"
 QH_PROMPTS="$QH_REPO/prompts"
-QH_PYTHON="${QH_PYTHON:-python3}"
+QH_VENV="${QH_VENV:-$QH_DATA_DIR/venv}"
+QH_PYTHON="${QH_PYTHON:-$QH_VENV/bin/python}"
 
 export QH_CONFIG_DIR QH_DATA_DIR QH_RUNTIME_DIR QH_PROMPTS
 
@@ -31,9 +35,9 @@ qh_warn() {
     printf 'quiz-helper: %s\n' "$*" >&2
 }
 
-# Executa o pacote Python do repositório (somente biblioteca padrão).
+# Executa o pacote Python do repositório com o Python do venv (Playwright).
 qv() {
-    PYTHONPATH="$QH_REPO/lib${PYTHONPATH:+:$PYTHONPATH}" "$QH_PYTHON" -m quizvision "$@"
+    PYTHONPATH="$QH_REPO/lib${PYTHONPATH:+:$PYTHONPATH}" "$QH_PYTHON" -m quizhelper "$@"
 }
 
 # Lê um arquivo KEY=VALUE sem executá-lo e define CFG_<KEY>.
@@ -63,7 +67,7 @@ qh_load_config() {
     qh_read_kv "$QH_PATHS_FILE"
     qh_read_kv "$QH_USER_CONFIG"
     # Valida tipos e valores com o mesmo parser do Python.
-    if ! qv config --default "$QH_DEFAULT_CONFIG" --user "$QH_USER_CONFIG" > /dev/null; then
+    if ! qv config > /dev/null; then
         qh_die "configuração inválida em $QH_USER_CONFIG"
     fi
 }

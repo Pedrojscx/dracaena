@@ -49,7 +49,7 @@ qh_claude_start() {
     [[ -n "${CFG_CLAUDE_EXTRA_ARGS:-}" ]] && extra=(${CFG_CLAUDE_EXTRA_ARGS})
     (
         cd "$dir" || exit 1
-        exec timeout --kill-after=5 "${CFG_CLAUDE_TIMEOUT:-45}" "$bin" -p --model "${CFG_MODEL:-sonnet}" \
+        exec timeout --kill-after=5 "${CFG_CLAUDE_TIMEOUT:-45}" "$bin" -p --model "${CFG_MODEL:-haiku}" \
             --tools Read --allowedTools Read --strict-mcp-config --disable-slash-commands \
             --no-session-persistence --output-format text "${extra[@]}" "$prompt"
     ) > "$out" 2> "$out.err" < /dev/null &

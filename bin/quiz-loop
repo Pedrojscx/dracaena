@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# quiz-loop: liga/desliga a resolução contínua do quiz aberto no navegador.
+# quiz-loop (SUPER+P): responde sozinho as questões da aba do NetAcad aberta
+# no Vivaldi do quiz-helper (quiz-browser), via Chrome DevTools Protocol.
 #
-#   quiz-loop                 alterna: inicia se parado, para se rodando
-#   quiz-loop --dry-run       faz tudo menos mover o cursor e clicar; salva
-#                             imagens anotadas com os pontos de clique
-#   quiz-loop --replay DIR    roda sobre um cenário de teste (sem tela real);
-#                             combinável com --dry-run
-#   quiz-loop --stop          só para (se estiver rodando)
-#   quiz-loop --status        mostra se está rodando ou pausado
+#   quiz-loop             nenhum loop rodando: inicia
+#                         rodando: pausa;  pausado: retoma (SIGUSR1)
+#   quiz-loop --stop      para (se estiver rodando)
+#   quiz-loop --status    mostra se está rodando
+#   quiz-loop --dry-run   lê e consulta o Claude, mas a guarda não clica
+#   quiz-loop --once      responde só a questão atual
 #
-# O bash executa; a decisão de cada passo vem de `quizvision step`.
+# Os cliques via CDP não movem o cursor: dá para usar o computador enquanto
+# o loop roda. O envio final da avaliação permanece manual.
 set -uo pipefail
 
 QH_REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
@@ -17,475 +18,68 @@ QH_REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 source "$QH_REPO/lib/sh/common.sh"
 # shellcheck source=../lib/sh/notify.sh
 source "$QH_REPO/lib/sh/notify.sh"
-# shellcheck source=../lib/sh/hypr.sh
-source "$QH_REPO/lib/sh/hypr.sh"
-# shellcheck source=../lib/sh/capture.sh
-source "$QH_REPO/lib/sh/capture.sh"
-# shellcheck source=../lib/sh/input.sh
-source "$QH_REPO/lib/sh/input.sh"
-# shellcheck source=../lib/sh/claude.sh
-source "$QH_REPO/lib/sh/claude.sh"
 
-usage() { sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
-MODE=real
-DRY=0
-REPLAY_DIR=""
-FIXTURES=""
-RUN_DIR=""
 ACTION=toggle
-OVERRIDE=""
+ARGS=()
 while (( $# )); do
     case "$1" in
-        --dry-run) DRY=1 ;;
-        --replay) MODE=replay; REPLAY_DIR="${2:?--replay precisa de uma pasta}"; shift ;;
-        --fixtures) FIXTURES="${2:?}"; shift ;;
-        --run-dir) RUN_DIR="${2:?}"; shift ;;
-        --set) OVERRIDE="${2:?}"; shift ;;
         --stop) ACTION=stop ;;
         --status) ACTION=status ;;
+        --dry-run|--once) ARGS+=("$1") ;;
         -h|--help) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
     esac
     shift
 done
 
-if [[ "$MODE" == replay ]]; then
-    # Replay é isolado: diretório de execução próprio, sem notificações,
-    # sem esperas reais e sem tocar no loop de verdade.
-    QH_RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/quiz-replay.XXXXXX")"
-    QH_NOTIFY_ENABLED=0
-    QH_NOTIFY_ID_FILE="$QH_RUNTIME_DIR/notify.id"
-    [[ -d "$REPLAY_DIR" ]] || qh_die "cenário não encontrado: $REPLAY_DIR"
-    FIXTURES="${FIXTURES:-$QH_REPO/tests/fixtures/out}"
-fi
-
-mkdir -p "$QH_RUNTIME_DIR" "$QH_DATA_DIR"
+mkdir -p "$QH_RUNTIME_DIR"
 PIDFILE="$QH_RUNTIME_DIR/loop.pid"
 LOCKFILE="$QH_RUNTIME_DIR/loop.lock"
-SESSION="$QH_RUNTIME_DIR/session.json"
-RESUME_MAX_S=7200
 
+# Pid do loop em execução (o bash antes do exec ou o Python depois dele).
 running_pid() {
-    local pid
+    local pid cmd
     [[ -r "$PIDFILE" ]] || return 1
     pid="$(< "$PIDFILE")"
     [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2> /dev/null || return 1
-    grep -q quiz-loop "/proc/$pid/cmdline" 2> /dev/null || return 1
+    cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2> /dev/null)"
+    [[ "$cmd" == *"quizhelper loop"* || "$cmd" == *quiz-loop* ]] || return 1
     printf '%s\n' "$pid"
 }
 
-if [[ "$MODE" != replay ]]; then
-    if pid="$(running_pid)"; then
-        case "$ACTION" in
-            status) echo "rodando (pid $pid)"; exit 0 ;;
-            *) kill -TERM "$pid"; exit 0 ;;
-        esac
-    fi
-    case "$ACTION" in
-        stop) exit 0 ;;
-        status)
-            if [[ -f "$SESSION" ]]; then echo "pausado (aperte o atalho para retomar)"; else echo "parado"; fi
-            exit 0 ;;
-    esac
-fi
-
+# A trava vale só durante a decisão (iniciar ou sinalizar). Ela é liberada
+# antes de iniciar qualquer processo, então nenhum filho (wl-copy, claude...)
+# a herda e a deixa presa depois que o loop termina.
 exec 9> "$LOCKFILE"
-if ! flock -n 9; then
-    qh_notify "quiz-helper" "Outro quiz-loop já está rodando." normal 4000 0
+if ! flock -w 3 9; then
+    qh_notify "quiz-helper" "Outro quiz-loop está iniciando; tente de novo." normal 3000
     exit 1
 fi
-printf '%s\n' "$$" > "$PIDFILE"
-
-qh_load_config
-qh_require jq magick tesseract "$QH_PYTHON"
-if [[ "$MODE" != replay ]]; then
-    qh_require grim hyprctl
-    (( DRY )) || qh_require ydotool slurp
-    qh_claude_bin > /dev/null || qh_die "claude não encontrado (rode quiz-doctor)"
-fi
-
-STOP=0
-HARD_PAUSE=""
-LAST_STATUS=""
-trap 'STOP=1' TERM INT
-# shellcheck disable=SC2329  # chamada pelo trap EXIT
-cleanup() {
-    rm -f "$PIDFILE"
-    if [[ "$MODE" == replay ]]; then
-        rm -rf "$QH_RUNTIME_DIR"
-    fi
-}
-trap cleanup EXIT
-
-# ------------------------------------------------------------------ execução e log
-
-# Rotação: capturas (do loop e do quiz-ask) com mais de KEEP_DAYS dias.
-for dir in "$QH_DATA_DIR/runs" "$QH_DATA_DIR/ask"; do
-    [[ -d "$dir" ]] || continue
-    find "$dir" -type f \( -name '*.png' -o -name '*.json' \) -mtime +"${CFG_KEEP_DAYS:-7}" -delete 2> /dev/null
-    find "$dir" -mindepth 1 -type d -empty -delete 2> /dev/null
-done
-
-if [[ -z "$RUN_DIR" ]]; then
-    RUN_DIR="$QH_DATA_DIR/runs/$(date +%Y%m%d-%H%M%S)"
-    (( DRY )) && RUN_DIR="$RUN_DIR-dryrun"
-fi
-mkdir -p "$RUN_DIR"
-RUN_LOG="$RUN_DIR/run.log"
-QH_INPUT_LOG="$RUN_LOG"
-
-log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$RUN_LOG"; }
-
-status_notify() {
-    local status="$1" answer="${2:-}" urgency=normal
-    local key="$status|$answer"
-    [[ "$key" == "$LAST_STATUS" ]] && return 0
-    LAST_STATUS="$key"
-    [[ "$status" == pausado* ]] && urgency=critical
-    local body="$status"
-    [[ -n "$answer" ]] && body="$status"$'\n'"$answer"
-    qh_notify "quiz-helper" "$body" "$urgency" 0 1
-    if [[ "$status" == pausado* && -n "$answer" && "$MODE" != replay ]]; then
-        printf '%s' "$answer" | wl-copy 2> /dev/null || true
-    fi
-}
-
-hard_pause() {
-    HARD_PAUSE="$1"
-    log "pausa: $1"
-}
-
-# ------------------------------------------------------------------ verificações
-
-WIN_JSON=""
-# Janela ativa é o navegador, com o monitor ligado? Guarda a geometria em WIN_JSON.
-window_ok() {
-    [[ "$MODE" == replay ]] && return 0
-    local active monitors
-    active="$(qh_hypr_active)"
-    monitors="$(qh_hypr_monitors)"
-    if [[ -z "$active" || -z "$monitors" ]]; then
-        WIN_JSON='{"ok":false,"problems":["hyprctl indisponível"]}'
-        return 1
-    fi
-    if qh_session_locked; then
-        WIN_JSON='{"ok":false,"problems":["a sessão está bloqueada"]}'
-        return 1
-    fi
-    WIN_JSON="$(qv window --active "$active" --monitors "$monitors" --regex "${CFG_BROWSER_CLASS_REGEX:-^vivaldi}")"
-    [[ "$(jq -r '.ok' <<< "$WIN_JSON")" == true ]]
-}
-
-window_problem() { jq -r '.problems | join("; ")' <<< "$WIN_JSON"; }
-
-# Antes de cada ação real: janela certa, igual à da captura usada para
-# calcular as coordenadas, e mouse onde o script o deixou. Retorna 2 se a
-# janela mudou de posição/tamanho (o Python captura de novo).
-safe_to_act() {
-    local expected="${1:-}"
-    [[ "$MODE" == real ]] && (( ! DRY )) || return 0
-    if ! window_ok; then
-        hard_pause "$(window_problem)"
-        return 1
-    fi
-    if [[ -n "$expected" && "$expected" != null ]]; then
-        local now
-        now="$(jq -c '{at: .window.at, size: .window.size}' <<< "$WIN_JSON")"
-        if [[ "$(jq -c '{at, size}' <<< "$expected")" != "$now" ]]; then
-            log "janela mudou desde a captura ($expected -> $now)"
-            return 2
-        fi
-    fi
-    if qh_mouse_moved; then
-        hard_pause "mouse movido pelo usuário"
-        return 1
-    fi
-    return 0
-}
-
-# Espera interrompível: STOP e parada de emergência a cada 100 ms.
-wait_ms() {
-    local ms="$1" manual="${2:-false}" end
-    [[ "$MODE" == replay ]] && return 0
-    end=$(( $(qh_now_ms) + ms ))
-    while (( $(qh_now_ms) < end )); do
-        (( STOP )) && return 1
-        if [[ "$MODE" == real ]] && (( ! DRY )) && [[ "$manual" != true ]] && qh_mouse_moved; then
-            hard_pause "mouse movido pelo usuário"
-            return 1
-        fi
-        sleep 0.1
-    done
-    return 0
-}
-
-# ------------------------------------------------------------------ primitivas
-
-EVENT=""
-
-# Captura a janela ativa inteira (o Vivaldi com a aba do quiz).
-do_capture() {
-    local d="$1" out delay stable manual
-    out="$(jq -r '.out' <<< "$d")"
-    delay="$(jq -r '.delay_ms // 0' <<< "$d")"
-    stable="$(jq -r '.stable' <<< "$d")"
-    manual="$(jq -r '.manual' <<< "$d")"
-    wait_ms "$delay" "$manual" || return 1
-    mkdir -p "$(dirname "$out")"
-    if [[ "$MODE" == replay ]]; then
-        local info
-        info="$(qv replay capture --state "$QH_RUNTIME_DIR/replay.json" --out "$out")" || return 1
-        EVENT="$(jq -c --arg img "$out" '{type:"captured", image:$img, origin:.origin, scale:.scale}' <<< "$info")"
-        return 0
-    fi
-    if ! window_ok; then
-        if [[ "$manual" == true ]]; then
-            EVENT='{"type":"capture_skipped"}'
-            return 0
-        fi
-        hard_pause "$(window_problem)"
-        return 1
-    fi
-    local geom scale ox oy
-    geom="$(jq -r '.window.geometry' <<< "$WIN_JSON")"
-    scale="$(jq -r '.window.scale' <<< "$WIN_JSON")"
-    ox="$(jq -r '.window.at[0]' <<< "$WIN_JSON")"
-    oy="$(jq -r '.window.at[1]' <<< "$WIN_JSON")"
-    if [[ "$stable" == true ]]; then
-        qh_grab_stable "$out" "$geom" "$scale" "${CFG_STABLE_INTERVAL_MS:-400}" "${CFG_STABLE_TOLERANCE_PX:-50}"
-        case $? in
-            0) ;;
-            2) log "aviso: tela não estabilizou; usando a última captura" ;;
-            *) hard_pause "falha na captura (grim; monitor apagado ou tela bloqueada?)"; return 1 ;;
-        esac
-    else
-        qh_grab "$out" "$geom" "$scale" || { hard_pause "falha na captura (grim; monitor apagado?)"; return 1; }
-    fi
-    EVENT="$(jq -nc --arg img "$out" --argjson ox "$ox" --argjson oy "$oy" --argjson s "$scale" \
-        '{type:"captured", image:$img, origin:[$ox,$oy], scale:$s}')"
-}
-
-# Executa uma ação. Retorno: 0 ok, 1 pausa/erro, 2 janela mudou desde a captura.
-run_action() {
-    local a="$1" expected="$2" type x y rc
-    type="$(jq -r '.type' <<< "$a")"
-    x="$(jq -r '.x' <<< "$a")"
-    y="$(jq -r '.y' <<< "$a")"
-    if (( DRY )); then
-        log "dry-run: $type em $x,$y (não executado)"
-        return 0
-    fi
-    if [[ "$MODE" == replay ]]; then
-        qv replay input --state "$QH_RUNTIME_DIR/replay.json" --data "$a" > /dev/null || return 1
-        return 0
-    fi
-    safe_to_act "$expected"
-    rc=$?
-    (( rc == 0 )) || return "$rc"
-    case "$type" in
-        click|click_next)
-            qh_click "$x" "$y" ;;
-        drag)
-            qh_drag "$x" "$y" "$(jq -r '.x2' <<< "$a")" "$(jq -r '.y2' <<< "$a")" \
-                "$(jq -r '.steps // 12' <<< "$a")" "$(jq -r '.step_ms // 15' <<< "$a")" ;;
-        scroll)
-            qh_scroll "$x" "$y" "$(jq -r '.amount' <<< "$a")" ;;
-        *)
-            QH_INPUT_ERROR="ação desconhecida: $type"; false ;;
-    esac || { hard_pause "falha ao executar $type: ${QH_INPUT_ERROR:-erro desconhecido}"; return 1; }
-    log "executado: $type em $x,$y"
-}
-
-do_input() {
-    local d="$1" n i expected rc
-    n="$(jq '.actions | length' <<< "$d")"
-    expected="$(jq -c '.window // null' <<< "$d")"
-    for (( i = 0; i < n; i++ )); do
-        (( STOP )) && return 1
-        run_action "$(jq -c ".actions[$i]" <<< "$d")" "$expected"
-        rc=$?
-        if (( rc == 2 )); then
-            EVENT='{"type":"stale"}'
-            return 0
-        fi
-        (( rc == 0 )) || return 1
-        [[ "$MODE" == real ]] && (( ! DRY )) && qh_ms_sleep 60
-    done
-    EVENT='{"type":"done"}'
-}
-
-# A seta de avançar não foi detectada: pede um clique do usuário (slurp -p).
-do_ask_point() {
-    local d="$1" msg sel
-    msg="$(jq -r '.message' <<< "$d")"
-    if [[ "$MODE" == replay ]]; then
-        sel="$(qv replay point --state "$QH_RUNTIME_DIR/replay.json" 2> /dev/null)" || sel=""
-    else
-        qh_notify "quiz-helper" "$msg"$'\n'"Esc cancela (e você avança manualmente)." critical 0 1
-        LAST_STATUS=""
-        qh_ms_sleep 600
-        sel="$(slurp -p 2> /dev/null)" || sel=""
-        qh_input_anchor
-    fi
-    if [[ "$sel" =~ ^(-?[0-9]+),(-?[0-9]+) ]]; then
-        log "seta informada pelo usuário: $sel"
-        EVENT="$(jq -nc --argjson x "${BASH_REMATCH[1]}" --argjson y "${BASH_REMATCH[2]}" '{type:"point", x:$x, y:$y}')"
-    else
-        log "pedido da seta cancelado"
-        EVENT='{"type":"point_cancel"}'
-    fi
-}
-
-# shellcheck disable=SC2329  # passada por nome para qh_claude_wait
-mouse_check() {
-    (( STOP )) && return 0
-    [[ "$MODE" == real ]] && (( ! DRY )) || return 1
-    if qh_mouse_moved; then
-        hard_pause "mouse movido pelo usuário"
-        return 0
-    fi
-    return 1
-}
-
-do_claude() {
-    local d="$1" kind stitched previous images=() t0 elapsed rc out
-    kind="$(jq -r '.prompt' <<< "$d")"
-    stitched="$(jq -r '.stitched' <<< "$d")"
-    previous="$(jq -r '.previous // ""' <<< "$d")"
-    mapfile -t images < <(jq -r '.images[]' <<< "$d")
-    out="$stitched.out.txt"
-    t0="$(qh_now_ms)"
-    if [[ "$MODE" == replay ]]; then
-        qv replay claude --state "$QH_RUNTIME_DIR/replay.json" > "$out" 2> "$out.err"
-        rc=$?
-    else
-        qh_stitch "$stitched" "${images[@]}" || { hard_pause "falha ao montar a imagem para o Claude"; return 1; }
-        qh_claude_start "$kind" "$stitched" "$out" "$previous"
-        if [[ -z "${QH_CLAUDE_PID:-}" ]]; then
-            rc=127
-        else
-            qh_claude_wait mouse_check
-            rc=$?
-        fi
-        (( rc == 3 )) && return 1   # parada de emergência ou STOP durante a consulta
-    fi
-    elapsed="$(awk -v a="$t0" -v b="$(qh_now_ms)" 'BEGIN { printf "%.2f", (b - a) / 1000 }')"
-    log "claude ($kind) rc=$rc em ${elapsed}s"
-    if (( rc == 0 )) && [[ -s "$out" ]]; then
-        EVENT="$(jq -nc --rawfile text "$out" --argjson e "$elapsed" '{type:"claude", text:$text, elapsed:$e}')"
-    else
-        local reason="código $rc"
-        (( rc == 124 )) && reason="tempo esgotado (${CFG_CLAUDE_TIMEOUT}s)"
-        [[ -s "$out.err" ]] && reason="$reason: $(head -c 300 "$out.err" | tr '\n' ' ')"
-        EVENT="$(jq -nc --arg r "$reason" --argjson e "$elapsed" '{type:"claude_error", reason:$r, elapsed:$e}')"
-    fi
-}
-
-# ------------------------------------------------------------------ início
-
-if [[ "$MODE" == real ]]; then
-    if ! window_ok; then
-        qh_notify "quiz-helper" "Não iniciado: $(window_problem)" critical 8000 1
-        exit 1
-    fi
-fi
-
-if [[ "$MODE" == replay ]]; then
-    qv replay init --scenario "$REPLAY_DIR" --fixtures "$FIXTURES" --state "$QH_RUNTIME_DIR/replay.json" ||
-        qh_die "falha ao iniciar o replay"
-    OVERRIDE="$(jq -c '.config // {}' "$REPLAY_DIR/scenario.json")"
-fi
-
-EVENT='{"type":"start"}'
-if [[ "$MODE" == real ]] && (( ! DRY )) && [[ -f "$SESSION" ]] && (( $(date +%s) - $(stat -c %Y "$SESSION") < RESUME_MAX_S )); then
-    RUN_DIR="$(jq -r '.run_dir' "$SESSION")"
-    RUN_LOG="$RUN_DIR/run.log"
-    QH_INPUT_LOG="$RUN_LOG"
-    EVENT='{"type":"resume"}'
-    log "retomando"
-else
-    rm -f "$SESSION"
-    args=(--default "$QH_DEFAULT_CONFIG" --user "$QH_USER_CONFIG" --run-dir "$RUN_DIR" --state "$SESSION")
-    (( DRY )) && args+=(--dry-run)
-    [[ "$MODE" == replay ]] && args+=(--replay)
-    [[ -n "$OVERRIDE" ]] && args+=(--override "$OVERRIDE")
-    qv session-new "${args[@]}" || qh_die "falha ao criar a sessão"
-    log "início (modo $MODE)"
-fi
-
-[[ "$MODE" == real ]] && (( ! DRY )) && qh_input_anchor
-if (( DRY )); then
-    status_notify "quiz-loop (dry-run): iniciando"
-else
-    status_notify "quiz-loop: iniciando"
-fi
-
-# ------------------------------------------------------------------ laço principal
-
-FINAL=""
-STEPS=0
-REPLAY_MAX_STEPS="${QH_REPLAY_MAX_STEPS:-400}"
-while true; do
-    STEPS=$(( STEPS + 1 ))
-    if [[ "$MODE" == replay ]] && (( STEPS > REPLAY_MAX_STEPS )); then
-        log "replay: limite de $REPLAY_MAX_STEPS passos atingido (cenário preso, ex.: pausa sem saída)"
-        printf 'replay: limite de %s passos atingido; veja %s\n' "$REPLAY_MAX_STEPS" "$RUN_LOG" >&2
-        exit 1
-    fi
-    if (( STOP )); then
-        log "parado pelo usuário"
-        rm -f "$SESSION"
-        qh_notify "quiz-helper" "quiz-loop parado." normal 4000 1
-        exit 0
-    fi
-    printf '%s' "$EVENT" > "$QH_RUNTIME_DIR/event.json"
-    if ! DIRECTIVE="$(qv step --state "$SESSION" --event "@$QH_RUNTIME_DIR/event.json")"; then
-        log "quizvision step falhou"
-        qh_notify "quiz-helper" "Erro interno; veja $RUN_LOG" critical 0 1
-        exit 1
-    fi
-    DO="$(jq -r '.do' <<< "$DIRECTIVE")"
-    status_notify "$(jq -r '.status // ""' <<< "$DIRECTIVE")" "$(jq -r '.answer // ""' <<< "$DIRECTIVE")"
-    # Ao sair de uma pausa manual, o usuário pode ter mexido no mouse: nova referência.
-    if [[ "$MODE" == real ]] && (( ! DRY )) && [[ "$(jq -r '.manual // false' <<< "$DIRECTIVE")" == true ]]; then
-        RESET_ANCHOR=1
-    elif [[ "${RESET_ANCHOR:-0}" == 1 ]]; then
-        qh_input_anchor
-        RESET_ANCHOR=0
-    fi
-    ok=0
-    case "$DO" in
-        capture) do_capture "$DIRECTIVE" || ok=1 ;;
-        input) do_input "$DIRECTIVE" || ok=1 ;;
-        ask_claude) do_claude "$DIRECTIVE" || ok=1 ;;
-        ask_point) do_ask_point "$DIRECTIVE" || ok=1 ;;
-        end) FINAL="$DIRECTIVE"; break ;;
-        *) log "diretiva desconhecida: $DO"; exit 1 ;;
+if pid="$(running_pid)"; then
+    case "$ACTION" in
+        status) echo "rodando (pid $pid)"; exit 0 ;;
+        stop) kill -TERM "$pid"; exit 0 ;;
+        *) kill -USR1 "$pid"; exit 0 ;;   # pausa ou retoma: o loop decide
     esac
-    if (( ok != 0 )); then
-        (( STOP )) && continue
-        if [[ -n "$HARD_PAUSE" ]]; then
-            qh_notify "quiz-helper" "pausado: $HARD_PAUSE"$'\n'"Aperte SUPER+P para retomar." critical 0 1
-            # Só o modo real guarda a sessão para retomar no próximo atalho.
-            if [[ "$MODE" != real ]] || (( DRY )); then
-                rm -f "$SESSION"
-            fi
-            exit 0
-        fi
-        log "falha sem motivo registrado em $DO"
-        exit 1
-    fi
-done
-
-MESSAGE="$(jq -r '.message' <<< "$FINAL")"
-log "fim: $(jq -c '{reason, summary}' <<< "$FINAL")"
-qh_notify "quiz-helper" "$MESSAGE" normal 0 1
-rm -f "$SESSION"
-if [[ "$MODE" == replay ]]; then
-    printf '%s\n' "$FINAL" > "$RUN_DIR/end.json"
-    printf '%s\n' "$MESSAGE"
-    qv replay check --state "$QH_RUNTIME_DIR/replay.json" --data "@$RUN_DIR/end.json" --run-dir "$RUN_DIR"
-    exit $?
 fi
-exit 0
+case "$ACTION" in
+    stop) exit 0 ;;
+    status) echo "parado"; exit 0 ;;
+esac
+
+[[ -x "$QH_PYTHON" ]] || { qh_notify "quiz-helper" "Python do venv ausente ($QH_PYTHON); rode install.sh" critical 8000; exit 1; }
+# Um SIGUSR1 que chegue entre gravar o pid e o exec é ignorado (sem matar o bash).
+trap '' USR1
+printf '%s\n' "$$" > "$PIDFILE"
+exec 9>&-
+
+qh_read_kv "$QH_DEFAULT_CONFIG"
+qh_read_kv "$QH_USER_CONFIG"
+if [[ -d "$QH_DATA_DIR/runs" ]]; then
+    find "$QH_DATA_DIR/runs" -mindepth 1 -maxdepth 1 -type d -mtime +"${CFG_KEEP_DAYS:-7}" -exec rm -rf {} + 2> /dev/null
+fi
+
+export PYTHONPATH="$QH_REPO/lib${PYTHONPATH:+:$PYTHONPATH}"
+exec "$QH_PYTHON" -m quizhelper loop "${ARGS[@]}"

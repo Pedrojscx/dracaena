@@ -15,7 +15,7 @@ if [[ -n "${XDG_RUNTIME_DIR:-}" && -r "$XDG_RUNTIME_DIR/quiz-helper/loop.pid" ]]
 fi
 
 # quiz-calibrate: comando antigo, removido se ainda houver o symlink.
-for c in quiz-loop quiz-ask quiz-doctor quiz-calibrate; do
+for c in quiz-loop quiz-ask quiz-doctor quiz-browser quiz-calibrate; do
     dst="$HOME/.local/bin/$c"
     if [[ -L "$dst" && "$(readlink -f "$dst")" == "$REPO/bin/$c" ]]; then
         rm -f "$dst"

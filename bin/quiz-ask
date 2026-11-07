@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# quiz-ask: resposta de uma questão, sem clicar em nada (plano B).
-#
-#   quiz-ask            captura a janela do Vivaldi em foco, detecta o painel
-#                       do quiz como o quiz-loop e envia o recorte ao Claude
-#   quiz-ask --select   você seleciona a região da questão com o mouse (slurp)
-#
-# A resposta chega numa notificação e vai para a área de transferência.
+# quiz-ask (SUPER+SHIFT+P): responde a questão atual da aba do NetAcad (lida
+# do DOM via CDP) e só NOTIFICA a resposta, copiando-a para a área de
+# transferência. Não clica em nada.
 set -uo pipefail
 
 QH_REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
@@ -13,91 +9,17 @@ QH_REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 source "$QH_REPO/lib/sh/common.sh"
 # shellcheck source=../lib/sh/notify.sh
 source "$QH_REPO/lib/sh/notify.sh"
-# shellcheck source=../lib/sh/hypr.sh
-source "$QH_REPO/lib/sh/hypr.sh"
-# shellcheck source=../lib/sh/claude.sh
-source "$QH_REPO/lib/sh/claude.sh"
 
-SELECT=0
 case "${1:-}" in
-    -h|--help) sed -n '2,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    --select) SELECT=1 ;;
-    "") ;;
-    *) sed -n '2,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+    -h|--help) sed -n '2,4p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
-mkdir -p "$QH_RUNTIME_DIR" "$QH_DATA_DIR/ask"
+mkdir -p "$QH_RUNTIME_DIR"
+# Uma consulta por vez. O Python fecha os descritores herdados nos processos
+# que inicia (claude, wl-copy), então a trava some quando ele termina.
 exec 9> "$QH_RUNTIME_DIR/ask.lock"
 flock -n 9 || exit 0
 
-qh_load_config
-qh_require grim jq magick wl-copy notify-send hyprctl "$QH_PYTHON"
-qh_claude_bin > /dev/null || { qh_notify "quiz-ask" "claude não encontrado (rode quiz-doctor)" critical 8000 0; exit 1; }
-
-dir="$QH_DATA_DIR/ask/$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$dir"
-log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$dir/log.txt"; }
-
-if (( SELECT )); then
-    qh_require slurp
-    region="$(slurp -d 2> /dev/null)" || { qh_notify "quiz-ask" "Seleção cancelada." low 2500 0; exit 0; }
-    # Escala do monitor que contém o canto da seleção (coordenadas lógicas).
-    read -r rx ry _ <<< "${region//,/ }"
-    scale="$(hyprctl -j monitors | jq -r --argjson x "$rx" --argjson y "$ry" '[.[] | select($x >= .x and $y >= .y
-        and $x < .x + (.width / .scale) and $y < .y + (.height / .scale))][0].scale // 1')"
-    [[ "$scale" =~ ^[0-9.]+$ ]] || scale=1
-    img="$dir/questao.png"
-    timeout 10 grim -g "$region" -s "$scale" -t png "$img" ||
-        { qh_notify "quiz-ask" "Falha na captura (monitor apagado?)." critical 5000 0; exit 1; }
-    log "seleção manual: $region (escala $scale)"
-else
-    win="$(qv window --active "$(qh_hypr_active)" --monitors "$(qh_hypr_monitors)" --regex "${CFG_BROWSER_CLASS_REGEX:-^vivaldi}")"
-    if [[ "$(jq -r '.ok' <<< "$win")" != true ]]; then
-        qh_notify "quiz-ask" "$(jq -r '.problems | join("; ")' <<< "$win"). Ou use quiz-ask --select." normal 8000 0
-        exit 0
-    fi
-    scale="$(jq -r '.window.scale' <<< "$win")"
-    shot="$dir/janela.png"
-    timeout 10 grim -g "$(jq -r '.window.geometry' <<< "$win")" -s "$scale" -t png "$shot" ||
-        { qh_notify "quiz-ask" "Falha na captura (monitor apagado?)." critical 5000 0; exit 1; }
-    det="$(qv detect --image "$shot" --scale "$scale" --default "$QH_DEFAULT_CONFIG" --user "$QH_USER_CONFIG")" ||
-        { qh_notify "quiz-ask" "Falha na detecção da página." critical 8000 0; exit 1; }
-    if [[ "$(jq -r '.panel != null' <<< "$det")" == true ]]; then
-        img="$(jq -r '.panel_path' <<< "$det")"
-        log "painel detectado: $(jq -c '.panel' <<< "$det"); âncoras: $(jq -c '.anchors' <<< "$det")"
-    else
-        img="$(jq -r '.content_path' <<< "$det")"
-        log "painel não detectado ($(jq -r '.reason' <<< "$det")); enviando a área de conteúdo inteira"
-    fi
-fi
-
-qh_notify "quiz-ask" "Consultando o Claude..." normal 0 1
-answer=""
-for attempt in 1 2; do
-    out="$dir/claude-$attempt.txt"
-    qh_claude_start answer "$img" "$out"
-    [[ -n "${QH_CLAUDE_PID:-}" ]] || break
-    qh_claude_wait ""
-    if json="$(qv validate "$out" 2> "$dir/validate-$attempt.err")"; then
-        answer="$json"
-        break
-    fi
-done
-
-if [[ -z "$answer" ]]; then
-    reason="$(cat "$dir"/validate-*.err "$dir"/claude-*.txt.err 2> /dev/null | head -c 300)"
-    qh_notify "quiz-ask" "Resposta inválida do Claude.${reason:+ $reason}" critical 10000 1
-    exit 1
-fi
-printf '%s\n' "$answer" > "$dir/resposta.json"
-log "resposta: $answer"
-
-if [[ "$(jq -r '.type' <<< "$answer")" == INCOMPLETE ]]; then
-    qh_notify "quiz-ask" "A questão não aparece inteira. Role até ela caber na tela ou use quiz-ask --select." critical 10000 1
-    exit 0
-fi
-
-text="$(qv validate --readable "$dir/resposta.json")"
-printf '%s' "$text" | wl-copy
-qh_notify "quiz-ask" "$text" normal 30000 1
-printf '%s\n' "$text"
+[[ -x "$QH_PYTHON" ]] || { qh_notify "quiz-ask" "Python do venv ausente ($QH_PYTHON); rode install.sh" critical 8000; exit 1; }
+export PYTHONPATH="$QH_REPO/lib${PYTHONPATH:+:$PYTHONPATH}"
+exec "$QH_PYTHON" -m quizhelper ask
