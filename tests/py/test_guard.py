@@ -6,9 +6,7 @@ import re
 import unittest
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
-
-from web import REPO, FixtureServer, launch
+from web import REPO, BrowserFixtureCase
 
 from quizhelper import dom
 from quizhelper.guard import FinalScreen, Guard, Refused
@@ -21,19 +19,7 @@ FINAL_PAGES = ["assessment_final.html"]
 FS_JS = dom.js(r"""const fs = QH.first(document, e => e.tagName === 'FINALSCREEN-VIEW'); return fs ? fs.shadowRoot : null;""")
 
 
-class GuardTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.server = FixtureServer()
-        cls.pw = sync_playwright().start()
-        cls.browser = launch(cls.pw)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.browser.close()
-        cls.pw.stop()
-        cls.server.close()
-
+class GuardTests(BrowserFixtureCase):
     def setUp(self):
         self.page = self.browser.new_page()
         self.log: list[str] = []
