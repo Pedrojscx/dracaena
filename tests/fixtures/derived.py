@@ -69,14 +69,15 @@ def mcq(cid: str, title: str, stem: str, options: list[str], multi: bool, order:
     return shadow("mcq-view", inner)
 
 
-def dropdowns(cid: str, stem: str, instruction: str, items: list[str], options: list[str]) -> str:
+def dropdowns(cid: str, stem: str, instruction: str, items: list[str], options: list[str],
+              reverse_options: bool = False) -> str:
     dd = []
     for i, text in enumerate(items):
         lis = "".join(
             f'<li role="option" id="dropdown__item-index-{k}" class="dropdown__item js-dropdown-list-item" data-index="{k}" '
             f'aria-selected="false"><div class="dropdown__item-inner js-dropdown-list-item-inner" tabindex="0" '
             f'value="{E(o)}">{E(o)}<span class="sr-only">, {k + 1} of {len(options)}, not selected</span></div></li>'
-            for k, o in enumerate(options))
+            for k, o in (reversed(list(enumerate(options))) if reverse_options else enumerate(options)))
         inner = (f'<div class="matching__item-container-options-wrapper {i}"><div class="matching__item-title_inner" '
                  f'data-socialgoodpulse-index="{i}"><div class="matching__item-title" tabindex="0">'
                  f'<div class="matching__item-title_inner">{E(text)}</div></div>'
@@ -212,6 +213,10 @@ def main(argv: list[str]) -> int:
         "cyu_dropdown.html": section("9.9.2 Cloud Services", dropdowns(
             "d1", "Synthetic example: there are four colored boxes.", "Select the color named in each invented label.",
             ["Red box.", "Blue box.", "Green box.", "Yellow box."], ["Red", "Blue", "Green", "Yellow"])),
+        "cyu_dropdown_reversed.html": section("9.9.2 Cloud Services", dropdowns(
+            "d1", "Synthetic example: there are four colored boxes.", "Select the color named in each invented label.",
+            ["Red box.", "Blue box.", "Green box.", "Yellow box."], ["Red", "Blue", "Green", "Yellow"],
+            reverse_options=True)),
         "cyu_match.html": section("9.9.1.4 Check Your Understanding - Terminology", object_matching(
             "m1", "Synthetic example: match each shape to its label",
             ["Circle", "Square", "Triangle"],
