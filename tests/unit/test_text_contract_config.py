@@ -88,7 +88,7 @@ class ContractTests(unittest.TestCase):
 class ConfigTests(unittest.TestCase):
     def test_default_file_parses(self):
         cfg = config.load(REPO / "config" / "quiz-helper.conf")
-        self.assertEqual(cfg["MODEL"], "sonnet")
+        self.assertEqual(cfg["MODEL"], "haiku")
         self.assertEqual(cfg["CLICK_OFFSET_X"], 40)
         self.assertAlmostEqual(cfg["MATCH_THRESHOLD"], 0.6)
         self.assertEqual(cfg["SUBMIT_WORDS_BLOCKLIST"], ["all", "assessment", "exam", "finish", "end"])
