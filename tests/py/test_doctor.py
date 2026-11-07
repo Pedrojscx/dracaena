@@ -69,3 +69,54 @@ class DoctorTest(unittest.TestCase):
 
     def test_connection_failure_omits_details(self):
         self.assertEqual(self.run_doctor(cdp_error=True)[0], 1)
+
+
+class CmdlineMatchesTest(unittest.TestCase):
+    profile = Path('/x/vivaldi-profile')
+
+    def cmdline(self, separator, profile=None, port=9222, extra=()):
+        args = ['vivaldi', f'--user-data-dir={profile or self.profile}',
+                f'--remote-debugging-port={port}', *extra]
+        return (separator.join(args) + '\0').encode()
+
+    def test_nul_separated(self):
+        self.assertTrue(doctor.cmdline_matches(self.cmdline('\0'), self.profile, 9222))
+
+    def test_space_separated(self):
+        raw = self.cmdline(' ')
+        for value in (raw, raw.rstrip(b'\0')):
+            with self.subTest(raw=value):
+                self.assertTrue(doctor.cmdline_matches(value, self.profile, 9222))
+
+    def test_different_port(self):
+        for separator in ('\0', ' '):
+            with self.subTest(separator=separator):
+                self.assertFalse(doctor.cmdline_matches(self.cmdline(separator, port=9223), self.profile, 9222))
+
+    def test_different_profile(self):
+        for separator in ('\0', ' '):
+            with self.subTest(separator=separator):
+                self.assertFalse(doctor.cmdline_matches(self.cmdline(separator, profile='/other/profile'),
+                                                       self.profile, 9222))
+
+    def test_flag_value_prefix_does_not_match(self):
+        for separator in ('\0', ' '):
+            for raw in (self.cmdline(separator, profile=str(self.profile) + '-2'),
+                        self.cmdline(separator, port=92220)):
+                with self.subTest(raw=raw):
+                    self.assertFalse(doctor.cmdline_matches(raw, self.profile, 9222))
+
+    def test_child_process_is_rejected(self):
+        for separator in ('\0', ' '):
+            with self.subTest(separator=separator):
+                self.assertFalse(doctor.cmdline_matches(self.cmdline(separator, extra=['--type=renderer']),
+                                                       self.profile, 9222))
+
+    def test_nul_preserves_spaces_and_regex_characters_in_profile(self):
+        profile = Path('/x/profile [1].dir')
+        self.assertTrue(doctor.cmdline_matches(self.cmdline('\0', profile=profile), profile, 9222))
+        self.assertFalse(doctor.cmdline_matches(self.cmdline('\0', profile=str(profile) + ' other'), profile, 9222))
+
+    def test_nul_argument_containing_flags_is_not_a_match(self):
+        raw = b'vivaldi\0--title= --user-data-dir=/x/vivaldi-profile --remote-debugging-port=9222\0'
+        self.assertFalse(doctor.cmdline_matches(raw, self.profile, 9222))

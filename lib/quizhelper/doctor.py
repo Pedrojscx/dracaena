@@ -3,12 +3,27 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from . import browser, cdp, claude, config, dom
+
+
+def cmdline_matches(raw: bytes, profile, port) -> bool:
+    """Reconhece as flags do processo principal, inclusive o título reescrito."""
+    text = raw.decode(errors='replace')
+    # Prefere limites NUL quando há argumentos separados; um único texto com
+    # NUL final pode ser o título reescrito pelo Vivaldi. Nesse formato, espaços
+    # em caminhos são ambíguos e podem causar falsos positivos ou negativos.
+    separator = r"[\0]" if len([arg for arg in text.split('\0') if arg]) > 1 else r"[\0 ]"
+    start, end = rf"(?:^|{separator})", rf"(?:{separator}|$)"
+    if re.search(start + r"--type=", text):
+        return False
+    return all(re.search(start + re.escape(flag) + end, text) is not None
+               for flag in (f"--user-data-dir={profile}", f"--remote-debugging-port={port}"))
 
 
 def run() -> int:
@@ -61,8 +76,7 @@ def run() -> int:
     dedicated = False
     for proc in Path('/proc').glob('[0-9]*/cmdline'):
         try:
-            args = proc.read_bytes().decode(errors='replace').split('\0')
-            dedicated |= f"--user-data-dir={profile}" in args and f"--remote-debugging-port={port}" in args
+            dedicated |= cmdline_matches(proc.read_bytes(), profile, port)
         except OSError:
             continue
     report(dedicated, "navegador com perfil dedicado e porta configurada", "abra pelo quiz-browser")
