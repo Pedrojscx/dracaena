@@ -306,6 +306,19 @@ página de verdade continua sendo manual, com `quiz-doctor` e `--dry-run`.
 | Uma chamada `claude -p` por questão, sem ferramentas | Sessão persistente do Claude Code com ferramentas | Sem estado entre questões e menor latência medida |
 | Pausar diante do inesperado | Repetir a ação até dar certo | Evita cliques repetidos ou fora de lugar |
 
+## Desempenho
+
+Medido nos registros locais de `questions.jsonl` (execuções reais com o modelo `haiku`). Esses registros ficam fora do
+Git, então os valores abaixo, arredondados, não podem ser reproduzidos a partir do repositório.
+
+| Métrica | Valor |
+|---|---|
+| Tempo médio por questão | cerca de 4,4 s |
+| Parcela desse tempo na consulta ao modelo | cerca de 92% |
+
+Ler o DOM, agir e esperar o avanço somam menos de meio segundo por questão. Qualquer ganho de velocidade está na escolha
+do modelo (`MODEL` e `RETRY_MODEL` na configuração) e no tamanho do prompt, não na automação.
+
 ## Instalar
 
 Requisitos: Python 3.10+ com `venv`, Bash, `curl`, `ss`, `flock` e `setsid`, Vivaldi (`vivaldi-stable`) e o Claude Code
@@ -461,10 +474,10 @@ Convenções do projeto: uma branch por tarefa, um commit por item, nada de `git
 
 ## Uso responsável
 
-O DRACAENA automatiza respostas em uma plataforma de ensino. Usá-lo em avaliações pode violar os termos da Cisco
-Networking Academy e as regras da sua instituição, com consequências acadêmicas que são só suas. O projeto bloqueia o
-envio final de propósito, mas isso não o torna adequado para fraudar uma prova. Use-o em atividades de estudo e em
-contas e cursos onde você tem autorização para isso.
+O DRACAENA automatiza a interação com uma plataforma de ensino. Usá-lo em avaliações pode violar os termos de uso da
+plataforma e as regras da sua instituição, com consequências acadêmicas que são só de quem o usa. A ferramenta bloqueia o
+envio final por segurança, mas isso não a torna adequada para esse fim. Use-a em atividades de estudo e em contas e cursos
+onde você tem autorização para isso.
 
 O projeto ainda não tem licença definida, então por padrão todos os direitos são reservados.
 
