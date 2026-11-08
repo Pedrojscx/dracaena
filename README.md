@@ -1,15 +1,25 @@
 <div align="center">
 
-# DRACAENA
+<h1><img src="docs/assets/banner.svg" alt="DRACAENA" width="720"></h1>
 
-Automação de interface via Chrome DevTools Protocol, com leitura estruturada do DOM, contrato de resposta validado e uma guarda única de ações.
+**Lê a página sem ruído, decide pouco e age com exatidão.**
+
+<img src="https://img.shields.io/badge/Python-3.10%2B-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
+<img src="https://img.shields.io/badge/Playwright-CDP-2ead33?style=flat-square&logo=playwright&logoColor=white" alt="Playwright via CDP">
+<a href="https://github.com/Pedrojscx/dracaena/actions/workflows/checks.yml"><img src="https://github.com/Pedrojscx/dracaena/actions/workflows/checks.yml/badge.svg" alt="CI: Offline checks"></a>
+<img src="https://img.shields.io/badge/idioma-pt--BR-13204a?style=flat-square" alt="Idioma pt-BR">
+<img src="https://img.shields.io/badge/status-projeto%20pessoal-8a8a8a?style=flat-square" alt="Status: projeto pessoal">
+
+[Funcionalidades](#-funcionalidades) · [Por que o nome?](#-por-que-o-nome) · [Como foi feito](#-como-foi-feito) · [Arquitetura](#-arquitetura-e-decisões-técnicas) · [Desempenho](#-desempenho) · [Instalar](#-instalar) · [Uso](#-uso) · [Configuração](#-configuração) · [Problemas](#-solução-de-problemas) · [Desenvolvimento](#-desenvolvimento) · [Uso responsável](#-uso-responsável)
 
 </div>
+
+---
 
 > [!NOTE]
 > Este é um projeto **pessoal**, validado apenas em Arch Linux com Hyprland e Vivaldi. O nome dos comandos continua
 > sendo `quiz-*`, herdado do nome original do projeto (`quiz-helper`). Leia a seção
-> [Uso responsável](#uso-responsável) antes de usar.
+> [Uso responsável](#-uso-responsável) antes de usar.
 
 O DRACAENA é uma ferramenta em Python que se conecta, por Chrome DevTools Protocol, a um navegador já aberto, lê o
 estado de uma página como dados estruturados (iframe e shadow roots abertos), entrega o enunciado ao Claude Code em modo
@@ -20,7 +30,7 @@ do NetAcad, que é só o ambiente de teste: nada na arquitetura depende dele al�
 Não há OCR, captura de tela para leitura nem automação de mouse. Como as ações saem pelo CDP e não movem o cursor, o
 computador continua utilizável enquanto o loop roda.
 
-## Funcionalidades
+## ✨ Funcionalidades
 
 | | O que faz |
 |---|---|
@@ -34,7 +44,7 @@ computador continua utilizável enquanto o loop roda.
 | **Diagnóstico** | `quiz-doctor` confere venv, Playwright, Claude, prompts, symlinks, perfil, porta, endpoint CDP, aba, iframe e a leitura de uma questão, sem clicar e sem gastar cota. |
 | **Privacidade** | Execuções em pastas `700` e arquivos `600`, credenciais reportadas só como `definida` ou `ausente`, CDP somente em loopback. |
 
-## Por que o nome?
+## 🐉 Por que o nome?
 
 *Dracaena* é um gênero de plantas, e o seu membro mais famoso nas casas brasileiras é a espada de São Jorge, *Dracaena trifasciata*, que até poucos anos atrás se chamava *Sansevieria trifasciata*. Estudos genéticos mostraram que as sansevierias eram uma linhagem suculenta dentro das dracenas, e a nomenclatura foi unificada. O nome científico vem do grego *drákaina*, "dragoa"; o popular, das folhas longas, eretas e pontiagudas, que lembram uma espada ou uma lança.
 
@@ -44,11 +54,13 @@ A imagem serve ao projeto. O dragão é a questão que parece grande demais; a l
 
 Quanto ao comando, ele continua `quiz-*` por herança do `quiz-helper`. Renomear tudo era trabalho demais para um dragão tão pequeno.
 
-## Como foi feito
+---
+
+## 🧪 Como foi feito
 
 O DRACAENA foi desenvolvido por um processo assistido por agentes de IA, com papéis separados e uma única pessoa decidindo
 o que entra. A separação existe por um motivo prático: quem lê logs e formula hipóteses não deve ser quem escreve o código
-e quem escreve o código não deve ser quem o aprova.
+e quem escreve o código não deve ser quem o revisa.
 
 | Papel | Quem | Responsabilidade |
 |---|---|---|
@@ -122,7 +134,9 @@ Os três defeitos abaixo só apareceram com a ferramenta rodando contra a págin
 
 </details>
 
-## Arquitetura e decisões técnicas
+---
+
+## 🧱 Arquitetura e decisões técnicas
 
 Cada subseção aponta o arquivo onde o assunto vive e explica o porquê da escolha. O princípio comum: uma falha de
 interpretação, de leitura ou de rede deve terminar em pausa, nunca numa ação irreversível.
@@ -306,7 +320,7 @@ página de verdade continua sendo manual, com `quiz-doctor` e `--dry-run`.
 | Uma chamada `claude -p` por questão, sem ferramentas | Sessão persistente do Claude Code com ferramentas | Sem estado entre questões e menor latência medida |
 | Pausar diante do inesperado | Repetir a ação até dar certo | Evita cliques repetidos ou fora de lugar |
 
-## Desempenho
+## 🚀 Desempenho
 
 Medido nos registros locais de `questions.jsonl` (execuções reais com o modelo `haiku`). Esses registros ficam fora do
 Git, então os valores abaixo, arredondados, não podem ser reproduzidos a partir do repositório.
@@ -319,7 +333,9 @@ Git, então os valores abaixo, arredondados, não podem ser reproduzidos a parti
 Ler o DOM, agir e esperar o avanço somam menos de meio segundo por questão. Qualquer ganho de velocidade está na escolha
 do modelo (`MODEL` e `RETRY_MODEL` na configuração) e no tamanho do prompt, não na automação.
 
-## Instalar
+---
+
+## 📦 Instalar
 
 Requisitos: Python 3.10+ com `venv`, Bash, `curl`, `ss`, `flock` e `setsid`, Vivaldi (`vivaldi-stable`) e o Claude Code
 instalado e autenticado (`claude auth login`). São opcionais `notify-send`, `wl-copy` e o Hyprland para os atalhos.
@@ -335,7 +351,10 @@ O instalador é idempotente: não usa `sudo`, não instala pacotes do sistema, n
 configuração pessoal e não edita o Hyprland. Ele grava em `~/.config/quiz-helper/paths` o caminho do `claude`, porque
 os atalhos do Hyprland não herdam o `PATH` do terminal. Para remover tudo: `./uninstall.sh`.
 
-## Uso
+## 🎯 Uso
+
+> [!TIP]
+> Comece por `quiz-doctor` e `quiz-loop --dry-run`: nenhum dos dois clica na página.
 
 ```sh
 quiz-browser        # abre o Vivaldi com perfil dedicado e CDP em 127.0.0.1:9222
@@ -346,6 +365,28 @@ quiz-loop           # responde de verdade
 ```
 
 O login e o início da atividade são manuais, no perfil dedicado. Depois disso o loop trabalha sozinho até a tela final.
+
+<details>
+<summary>Exemplo ilustrativo de saída do diagnóstico</summary>
+
+Saída de exemplo, com rótulos do `quiz-doctor`; o resultado real depende do seu ambiente.
+
+```text
+$ quiz-doctor
+[OK] Python 3.10+
+[OK] ambiente virtual
+[OK] Playwright importável
+[OK] configuração
+[OK] Claude Code
+[OK] autenticação Claude
+[OK] navegador com perfil dedicado e porta configurada
+[OK] porta CDP somente em loopback
+[OK] conexão CDP
+[OK] iframe da atividade acessível
+[OK] leitura da questão atual (conteúdo omitido)
+```
+
+</details>
 
 ### Atalhos
 
@@ -369,7 +410,7 @@ Opcionais, em `config/hyprland-binds.conf` (Hyprland clássico) e `config/hyprla
 | `quiz-doctor` | Diagnóstico somente leitura |
 | `quiz-doctor env` | Compara consultas sintéticas feitas pelo terminal e pelo Hyprland (consome cota) |
 
-## Como funciona
+## 🔀 Como funciona
 
 ```mermaid
 flowchart LR
@@ -387,7 +428,7 @@ flowchart LR
 Em atividades em carrossel, a questão atual vem da faixa de navegação e do contador "N of M"; em atividades de página única, do bloco indicado pelo título da aba. Figuras relevantes são capturadas do elemento da questão e enviadas ao Claude junto com o texto, e a
 falta de uma figura exigida pausa o loop.
 
-## Configuração
+## 🔧 Configuração
 
 O padrão fica em `config/quiz-helper.conf` e é copiado para `~/.config/quiz-helper/config` na primeira instalação.
 Formato `CHAVE=VALOR`.
@@ -405,7 +446,9 @@ Formato `CHAVE=VALOR`.
 
 `CLICK_SUBMIT` nunca autoriza o envio final.
 
-## Registros e privacidade
+---
+
+## 🔒 Registros e privacidade
 
 Cada execução gera `runs/<data>[-dryrun]/` com `run.log`, `questions.jsonl` e a saída crua do Claude por questão
 (`claude/Q001.txt`). Esses arquivos podem conter enunciados, respostas e caminhos locais, ficam fora do Git e são
@@ -414,7 +457,7 @@ apagados ao iniciar um novo loop quando passam de `KEEP_DAYS`.
 A porta CDP controla um perfil autenticado. Mesmo em loopback, qualquer processo local que a alcance tem esse poder, então
 não a exponha nem a encaminhe. O lançador recusa escuta fora de `127.0.0.1`.
 
-## Solução de problemas
+## 🩺 Solução de problemas
 
 <details>
 <summary><b>"pausado: dropdown não mostra a opção escolhida"</b></summary>
@@ -456,7 +499,7 @@ leitor depende da estrutura atual da página, e uma mudança de lá pode exigir 
 
 </details>
 
-## Desenvolvimento
+## 🧰 Desenvolvimento
 
 ```sh
 PYTHON="${XDG_DATA_HOME:-$HOME/.local/share}/quiz-helper/venv/bin/python"
@@ -472,7 +515,7 @@ o Claude e não usa o perfil do Vivaldi. A GitHub Action executa a mesma suíte 
 Convenções do projeto: uma branch por tarefa, um commit por item, nada de `git add -f` em perfis, cookies, `.env`,
 `runs/` ou capturas reais.
 
-## Uso responsável
+## 🤝 Uso responsável
 
 O DRACAENA automatiza a interação com uma plataforma de ensino. Usá-lo em avaliações pode violar os termos de uso da
 plataforma e as regras da sua instituição, com consequências acadêmicas que são só de quem o usa. A ferramenta bloqueia o
@@ -481,8 +524,8 @@ onde você tem autorização para isso.
 
 O projeto ainda não tem licença definida, então por padrão todos os direitos são reservados.
 
-<br>
+---
 
 <div align="center">
-<sub>DRACAENA · feito por Pedro Lucas em Arch Linux, com orquestração de Claude Code e Codex</sub>
+<sub>DRACAENA · Pedro Lucas · 2026</sub>
 </div>
