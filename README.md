@@ -46,7 +46,7 @@ computador continua utilizável enquanto o loop roda.
 
 ## 🐉 Por que o nome?
 
-<img src="docs/assets/logo.svg" alt="Ícone do DRACAENA: lótus de folhas de espada de São Jorge, em anéis de 13, 8 e 5 folhas com centro redondo, dentro de um quadrado de cantos contínuos em verde" width="110" align="right">
+<img src="docs/assets/logo.svg" alt="Ícone do DRACAENA: lótus de folhas de espada de São Jorge, em anéis de 21, 13, 8 e 5 folhas com centro redondo, dentro de um quadrado de cantos contínuos em verde" width="110" align="right">
 
 *Dracaena* é o gênero da espada de São Jorge, *Dracaena trifasciata*, que durante muito tempo foi classificada como *Sansevieria*; análises genéticas mostraram que as sansevierias pertencem ao mesmo gênero. O nome científico vem do grego *drákaina*, "dragoa". O nome popular brasileiro nasce da folha: longa, rígida e pontiaguda, que sobe em lâmina, como uma espada fincada na terra.
 
