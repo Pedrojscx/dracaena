@@ -46,13 +46,15 @@ computador continua utilizável enquanto o loop roda.
 
 ## 🐉 Por que o nome?
 
-*Dracaena* é um gênero de plantas, e o seu membro mais famoso nas casas brasileiras é a espada de São Jorge, *Dracaena trifasciata*, que até poucos anos atrás se chamava *Sansevieria trifasciata*. Estudos genéticos mostraram que as sansevierias eram uma linhagem suculenta dentro das dracenas, e a nomenclatura foi unificada. O nome científico vem do grego *drákaina*, "dragoa"; o popular, das folhas longas, eretas e pontiagudas, que lembram uma espada ou uma lança.
+<img src="docs/assets/logo.svg" alt="Símbolo do DRACAENA: quatro folhas de espada de São Jorge em pé" width="110" align="right">
 
-O santo é Jorge, soldado romano de origem na Capadócia, martirizado por volta do ano 303, na perseguição de Diocleciano, e venerado como mártir desde a Antiguidade. A parte do dragão é **lenda**, posterior ao martírio e popularizada na Idade Média: uma cidade entregava vítimas ao monstro, a princesa era a próxima, e Jorge o enfrenta com uma lança. A devoção chegou ao Brasil com os portugueses, o dia do santo é 23 de abril e, no sincretismo religioso brasileiro, ele é associado a Ogum. Aqui ele entra só como imagem, com respeito.
+*Dracaena* é o gênero da espada de São Jorge, *Dracaena trifasciata*, que durante muito tempo foi classificada como *Sansevieria*; análises genéticas mostraram que as sansevierias pertencem ao mesmo gênero. O nome científico vem do grego *drákaina*, "dragoa". O nome popular brasileiro nasce da folha: longa, rígida e pontiaguda, que sobe em lâmina, como uma espada fincada na terra.
 
-A imagem serve ao projeto. O dragão é a questão que parece grande demais; a lança é a ação precisa. A ferramenta lê a página sem ruído, decide pouco e age com exatidão, por uma guarda que só deixa passar o clique permitido. É só uma metáfora, mas combina.
+Jorge foi um soldado romano de origem na Capadócia, oficial de bravura, martirizado por volta do ano 303, sob Diocleciano, por não renegar a fé. Desde então é lembrado como mártir e como cavaleiro, padroeiro de soldados e cavaleiros e de nações como a Inglaterra. A devoção chegou ao Brasil pelas mãos de Portugal, e o seu dia é 23 de abril.
 
-Quanto ao comando, ele continua `quiz-*` por herança do `quiz-helper`. Renomear tudo era trabalho demais para um dragão tão pequeno.
+Sobre ele corre a **lenda** mais famosa da Idade Média, e não um fato histórico: um cavaleiro de armadura reluzente enfrenta, de lança em punho, o dragão que aterrorizava uma cidade, e não recua diante do monstro. É uma imagem de coragem, contada e recontada por séculos, e é só como imagem, com respeito, que ela entra aqui.
+
+No projeto, o dragão é a questão que parece grande demais; a lança é a ação precisa: leitura limpa da página, decisão curta, execução exata. Já o comando continua `quiz-*` por herança do `quiz-helper`: nem todo dragão merece uma refatoração completa.
 
 ---
 
