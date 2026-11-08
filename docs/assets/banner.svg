@@ -1,23 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 220" width="900" height="220" role="img" aria-labelledby="t d">
-  <title id="t">DRACAENA</title>
-  <desc id="d">Folha longa e pontiaguda, em verde, ao lado do nome DRACAENA e da legenda: automação de interface via Chrome DevTools Protocol.</desc>
-  <style>
-    .name { fill: #1f6b3d; }
-    .tag  { fill: #4b6b57; }
-    @media (prefers-color-scheme: dark) {
-      .name { fill: #5fd08a; }
-      .tag  { fill: #9fb8a8; }
-    }
-  </style>
-  <!-- folha: lâmina longa que termina em ponta -->
-  <g transform="translate(40 20)">
-    <path d="M0 170 C 40 120, 70 70, 120 25 C 135 12, 150 6, 160 0 C 158 14, 156 30, 150 52 C 130 108, 80 150, 18 178 Z"
-          fill="#2e9b57"/>
-    <path d="M0 170 C 40 120, 70 70, 120 25 C 135 12, 150 6, 160 0 C 150 20, 100 70, 50 128 C 34 146, 18 160, 0 170 Z"
-          fill="#1f7a43"/>
-    <path d="M4 168 C 50 118, 100 62, 158 4" fill="none" stroke="#9be0b3" stroke-width="2.5" stroke-linecap="round"/>
-    <path d="M40 130 l14 8 M62 106 l14 8 M84 82 l12 7 M106 58 l10 6" stroke="#b9ecc9" stroke-width="2" stroke-linecap="round" opacity=".8"/>
-  </g>
-  <text class="name" x="250" y="118" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="78" font-weight="700" letter-spacing="10">DRACAENA</text>
-  <text class="tag" x="254" y="158" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="22" letter-spacing="1.5">automação de interface via Chrome DevTools Protocol</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" width="1280" height="360" role="img" aria-labelledby="t d">
+  <title id="t">DRACAENA, leitura precisa, ação exata</title>
+  <desc id="d">Banner escuro em verde-floresta com o símbolo de quatro folhas de espada de São Jorge, o nome DRACAENA em marfim com contorno dourado e a frase Leitura precisa. Ação exata.</desc>
+  <defs>
+    <linearGradient id="lf" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#06402c"/><stop offset=".55" stop-color="#0f8a5a"/><stop offset="1" stop-color="#5eeaa8"/></linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#030806"/><stop offset="1" stop-color="#0a2a1c"/></linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#2fd08a" stop-opacity=".38"/><stop offset="1" stop-color="#2fd08a" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="1280" height="360" fill="url(#bg)"/>
+  <g stroke="#7fe3b4" stroke-width="1" opacity=".06" fill="none"><path d="M0 0V360"/><path d="M40 0V360"/><path d="M80 0V360"/><path d="M120 0V360"/><path d="M160 0V360"/><path d="M200 0V360"/><path d="M240 0V360"/><path d="M280 0V360"/><path d="M320 0V360"/><path d="M360 0V360"/><path d="M400 0V360"/><path d="M440 0V360"/><path d="M480 0V360"/><path d="M520 0V360"/><path d="M560 0V360"/><path d="M600 0V360"/><path d="M640 0V360"/><path d="M680 0V360"/><path d="M720 0V360"/><path d="M760 0V360"/><path d="M800 0V360"/><path d="M840 0V360"/><path d="M880 0V360"/><path d="M920 0V360"/><path d="M960 0V360"/><path d="M1000 0V360"/><path d="M1040 0V360"/><path d="M1080 0V360"/><path d="M1120 0V360"/><path d="M1160 0V360"/><path d="M1200 0V360"/><path d="M1240 0V360"/><path d="M1280 0V360"/><path d="M0 0H1280"/><path d="M0 40H1280"/><path d="M0 80H1280"/><path d="M0 120H1280"/><path d="M0 160H1280"/><path d="M0 200H1280"/><path d="M0 240H1280"/><path d="M0 280H1280"/><path d="M0 320H1280"/><path d="M0 360H1280"/></g>
+  <ellipse cx="260" cy="180" rx="250" ry="190" fill="url(#glow)"/>
+  <g transform="translate(72 22) scale(.66)"><rect x="96" y="12" width="320" height="488" rx="30" fill="none" stroke="#d4af37" stroke-width="2" opacity=".7"/><g transform="rotate(-2.5 196 144.0)"><path d="M173.0 252 C160.8 198.0 181.9 83.5 196 36 C210.1 83.5 231.2 198.0 219.0 252 Z" fill="url(#lf)" stroke="#d4af37" stroke-width="1.6" stroke-linejoin="round"/><path d="M196 246 L196 53.3" stroke="#a8f0cf" stroke-width="3" stroke-linecap="round" fill="none" opacity=".85"/></g><g transform="rotate(3 316 152.0)"><path d="M293.7 256 C281.9 204.0 302.4 93.8 316 48 C329.6 93.8 350.1 204.0 338.3 256 Z" fill="url(#lf)" stroke="#d4af37" stroke-width="1.6" stroke-linejoin="round"/><path d="M316 250 L316 64.6" stroke="#a8f0cf" stroke-width="3" stroke-linecap="round" fill="none" opacity=".85"/></g><g transform="rotate(2.5 196 382.0)"><path d="M173.0 488 C160.8 435.0 181.9 322.6 196 276 C210.1 322.6 231.2 435.0 219.0 488 Z" fill="url(#lf)" stroke="#d4af37" stroke-width="1.6" stroke-linejoin="round"/><path d="M196 482 L196 293.0" stroke="#a8f0cf" stroke-width="3" stroke-linecap="round" fill="none" opacity=".85"/></g><g transform="rotate(-3 316 375.0)"><path d="M293.0 484 C280.8 429.5 301.9 314.0 316 266 C330.1 314.0 351.2 429.5 339.0 484 Z" fill="url(#lf)" stroke="#d4af37" stroke-width="1.6" stroke-linejoin="round"/><path d="M316 478 L316 283.4" stroke="#a8f0cf" stroke-width="3" stroke-linecap="round" fill="none" opacity=".85"/></g></g>
+  <path d="M480 96H1180" stroke="#c9a227" stroke-width="1.5"/>
+  <text x="480" y="182" font-family="Georgia, 'Times New Roman', serif" font-size="88" font-weight="700" fill="#f3ecd6" stroke="#c9a227" stroke-width="1.2" paint-order="stroke" letter-spacing="16">DRACAENA</text>
+  <text x="482" y="238" font-family="Georgia, 'Times New Roman', serif" font-size="30" fill="#cfe3d6" letter-spacing="3">Leitura precisa. Ação exata.</text>
+  <path d="M480 270H1180" stroke="#c9a227" stroke-width="1.5"/>
 </svg>
