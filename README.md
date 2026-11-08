@@ -2,34 +2,23 @@
 
 # DRACAENA
 
-Um assistente local para atividades do NetAcad, feito em Python com [Playwright](https://playwright.dev) e [Claude Code](https://claude.com/claude-code).<br>
-Lê a questão direto do DOM, pergunta ao Claude, aplica a resposta por uma guarda de cliques e mede cada etapa do caminho.
-
-[Funcionalidades](#funcionalidades) · [Como foi feito](#como-foi-feito) · [Desempenho](#desempenho) · [Instalar](#instalar) · [Uso](#uso) · [Configuração](#configuração) · [Problemas](#solução-de-problemas) · [Desenvolvimento](#desenvolvimento)
-
-<img src="https://img.shields.io/badge/Python-3.10%2B-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
-<img src="https://img.shields.io/badge/Playwright-CDP-2ead33?style=flat-square&logo=playwright&logoColor=white" alt="Playwright via CDP">
-<img src="https://img.shields.io/badge/Claude%20Code-haiku-d97757?style=flat-square" alt="Claude Code">
-<img src="https://img.shields.io/badge/Arch%20Linux-Hyprland-1793d1?style=flat-square&logo=archlinux&logoColor=white" alt="Arch Linux e Hyprland">
-<img src="https://img.shields.io/badge/idioma-pt--BR-13204a?style=flat-square" alt="Idioma pt-BR">
+Automação de interface via Chrome DevTools Protocol, com leitura estruturada do DOM, contrato de resposta validado e uma guarda única de ações.
 
 </div>
 
 > [!NOTE]
 > Este é um projeto **pessoal**, validado apenas em Arch Linux com Hyprland e Vivaldi. O nome dos comandos continua
 > sendo `quiz-*`, herdado do nome original do projeto (`quiz-helper`). Leia a seção
-> [Uso responsável](#uso-responsável) antes de rodar em qualquer avaliação.
+> [Uso responsável](#uso-responsável) antes de usar.
 
-<br>
+O DRACAENA é uma ferramenta em Python que se conecta, por Chrome DevTools Protocol, a um navegador já aberto, lê o
+estado de uma página como dados estruturados (iframe e shadow roots abertos), entrega o enunciado ao Claude Code em modo
+não interativo e aplica a resposta por uma guarda que concentra todas as ações. A resposta volta como JSON e só chega à
+página depois de passar por um contrato que valida índices, quantidade e formato. A ferramenta foi testada em atividades
+do NetAcad, que é só o ambiente de teste: nada na arquitetura depende dele além do módulo que conhece a estrutura da página.
 
-O DRACAENA conecta ao Vivaldi por Chrome DevTools Protocol, entra no iframe da atividade do NetAcad, extrai a questão
-atual dos componentes da página e entrega o enunciado ao Claude Code em modo não interativo. A resposta volta como JSON,
-passa por um contrato que valida índices e quantidade de itens e só então chega à página, por uma guarda que concentra
-todos os cliques. O envio final da avaliação nunca é feito pela ferramenta.
-
-Não há OCR, captura de tela para leitura nem automação de mouse: a primeira versão do projeto trabalhava assim, e todo
-esse caminho foi removido (58 arquivos) quando a leitura pelo DOM provou ser mais rápida e mais exata. Como os cliques
-saem pelo CDP e não movem o cursor, o computador continua utilizável enquanto o loop roda.
+Não há OCR, captura de tela para leitura nem automação de mouse. Como as ações saem pelo CDP e não movem o cursor, o
+computador continua utilizável enquanto o loop roda.
 
 ## Funcionalidades
 
@@ -37,7 +26,7 @@ saem pelo CDP e não movem o cursor, o computador continua utilizável enquanto 
 |---|---|
 | **Leitura pelo DOM** | Percorre o iframe `authoring-resources` e os shadow roots abertos. Reconhece `mcq-view` (resposta única e múltipla), `matching-view` / `matching-dropdown-view` (listas de seleção) e `object-matching-view` (associação). |
 | **Contrato de resposta** | O Claude responde em JSON de quatro tipos: `SINGLE`, `MULTI`, `DROPDOWN` e `MATCH`. Índices fora do intervalo, quantidade errada ou resposta mal formada derivam para uma segunda tentativa, nunca para um clique. |
-| **Guarda de cliques** | Um único ponto aplica toda ação. Bloqueia envio final, confirmação de envio, Skip All, Skip Question e a tela final, e confere o alvo antes de agir. |
+| **Guarda de cliques** | Um único ponto aplica toda ação. Bloqueia o envio final, a confirmação de envio, Skip All, Skip Question e a tela final, e confere o alvo antes de agir. |
 | **Loop com pausa** | `SUPER+P` inicia, pausa e retoma. Qualquer situação inesperada (atividade nova, figura ausente, marcação não confirmada) pausa e notifica, em vez de insistir. |
 | **Segunda tentativa** | Nas seções do curso, que mostram feedback de acerto, a ferramenta reconsulta o Claude com o feedback, usa Reset e responde de novo. |
 | **Dry-run** | `--dry-run` lê, consulta o Claude e simula os cliques sem tocar na página. |
@@ -47,105 +36,7 @@ saem pelo CDP e não movem o cursor, o computador continua utilizável enquanto 
 
 ## Como foi feito
 
-O DRACAENA nasceu em um único dia, em uma esteira de agentes em que cada um tinha um papel fixo. O histórico público
-tem 21 commits, quase todos entre 17h e 21h de 7 de novembro de 2026, e a divisão foi esta:
-
-| Papel | Quem | O que fazia |
-|---|---|---|
-| **Operador** | Pedro | Define o objetivo, roda a ferramenta de verdade no NetAcad, cola logs e screenshots e decide cada merge. |
-| **Analista e arquiteto** | Claude (conversa) | Inventaria o repositório, lê os logs de execução, formula hipóteses, descarta as erradas e escreve o prompt de cada tarefa com critérios de aceitação. |
-| **Executor** | Codex | Recebe um prompt fechado, trabalha em uma branch, faz um commit por item, roda a suíte e devolve um relatório. Não faz push. |
-| **Motor de resposta** | Claude Code | Roda dentro do produto: cada questão é uma chamada `claude -p` isolada. |
-
-O Claude Code aparece duas vezes, de propósito. Fora do produto ele ajuda a projetar e diagnosticar. Dentro do produto
-ele é o motor que responde, restrito por `--safe-mode --tools '' --strict-mcp-config --no-chrome
---disable-slash-commands --no-session-persistence`, ou seja, sem ferramentas, sem MCP, sem navegador e sem memória entre
-perguntas. Só essa poda de contexto levou cada consulta de 4,5 s para 3,3 s nas medições registradas no código.
-
-O ciclo de trabalho se repetiu cinco vezes:
-
-1. O operador roda de verdade e cola o que viu, com log e imagem.
-2. O analista lê `run.log`, `questions.jsonl` e as saídas do Claude, e isola a causa.
-3. O analista escreve um prompt com escopo, arquivos permitidos, testes exigidos e o que não pode mudar.
-4. O executor entrega uma branch com um commit por item e um relatório.
-5. O operador confere os testes, faz o merge e repete o teste real.
-
-Esse ciclo produziu, nesta ordem, a faxina do código legado, a correção dos dropdowns, a correção do dry-run, a
-deduplicação com instalador mais rigoroso e o reconhecimento do processo do Vivaldi no diagnóstico.
-
-### O que os logs revelaram
-
-Três defeitos só apareceram por leitura de log, e nenhum teria sido achado sem a execução real:
-
-- **Dropdown embaralhado.** O DOM entrega as opções numa ordem e o atributo `data-index` em outra. A extração usava a
-  posição e a confirmação usava o índice, então o Claude acertava e a página mostrava outra opção. A correção ordena
-  por `data-index` e passa a confirmar também pelo texto exibido. Havia 14 questões de dropdown nos logs até então.
-- **Dry-run que acusava erro.** A simulação esperava que a página confirmasse um clique que nunca aconteceu e
-  notificava "marcação não confirmada". Agora a confirmação é dada como válida quando a guarda está simulando.
-- **Diagnóstico com falso negativo.** O `quiz-doctor` procurava a flag do perfil como item separado em
-  `/proc/<pid>/cmdline`, mas o Vivaldi reescreve a linha de comando do processo principal como um texto único separado
-  por espaços. A comparação agora aceita as duas formas e ignora processos auxiliares (`--type=`).
-
-Mais de 60 testes automatizados cobrem a guarda, o contrato, as ações de dropdown e dry-run, o diagnóstico e o
-instalador. Rodam em Python 3.10 e 3.14 na CI, com fixtures HTML sintéticas e sem conta real.
-
-## Desempenho
-
-Todos os números abaixo vêm dos registros reais de `questions.jsonl`: **527 questões em 48 execuções**, sendo 474 de
-avaliações e 53 de seções do curso, com o modelo `haiku`.
-
-### Tempo por questão
-
-| Métrica | Valor |
-|---|---|
-| Média | **4,42 s** |
-| Mediana | 4,26 s |
-| Percentil 90 | 5,84 s |
-| Maior execução contínua | 60 questões |
-
-### Onde o tempo vai
-
-| Etapa | Média |
-|---|---|
-| Consulta ao Claude | 4,07 s (mediana 3,90 s, p90 5,31 s, máximo 12,71 s) |
-| Espera pelo avanço da página | 0,230 s |
-| Ações de clique | 0,119 s (mediana 0,041 s) |
-| Submit | 0,025 s |
-| Leitura do DOM | 0,004 s |
-| Tudo fora do Claude | **0,364 s** |
-
-O Claude responde por 91,8% do tempo de cada questão. Ler, clicar e avançar somam menos de meio segundo, o que
-significa que qualquer ganho futuro de velocidade está na escolha do modelo e no tamanho do prompt, não na automação.
-
-### Por tipo de questão
-
-| Tipo | Questões | Claude (média) |
-|---|---|---|
-| `SINGLE` | 362 | 4,0 s |
-| `MULTI` | 104 | 4,3 s |
-| `DROPDOWN` | 14 | 4,2 s |
-| `MATCH` | 47 | 4,4 s |
-
-### Precisão
-
-Nas 53 questões de seções do curso, que exibem feedback de acerto e por isso podem ser conferidas, a ferramenta acertou
-**53 de 53**, sem precisar da segunda tentativa. Nas 474 questões de avaliação a página não informa o resultado, então
-**não existe taxa de acerto medida** para elas, e este README não estima uma.
-
-## Comparação entre modelos
-
-Só o `haiku` foi medido. Os demais modelos entram na tabela abaixo quando houver dados de uso real, e as células vazias
-são intencionais: preencher com estimativa seria o oposto do que o projeto faz com o resto dos números.
-
-| Modelo | Claude (média) | p90 | Precisão nas seções | Questões medidas |
-|---|---|---|---|---|
-| `haiku` (padrão) | 4,07 s | 5,31 s | 53/53 | 527 |
-| `sonnet` | não medido | não medido | não medido | 0 |
-| `opus` | não medido | não medido | não medido | 0 |
-
-Uma observação que já está nos dados: as 17 consultas em que o Claude gastou raciocínio estendido levaram em média
-4,9 s, contra 4,0 s nas 510 sem ele. O modelo padrão é uma escolha de latência, e `MODEL` e `RETRY_MODEL` na
-configuração permitem usar um modelo maior só na segunda tentativa.
+O DRACAENA foi desenvolvido com agentes de IA em papéis fixos, e a seção será detalhada adiante.
 
 ## Instalar
 
@@ -173,7 +64,7 @@ quiz-loop --dry-run # lê e consulta o Claude, mas não clica
 quiz-loop           # responde de verdade
 ```
 
-O login e o início da avaliação são manuais, no perfil dedicado. Depois disso o loop trabalha sozinho até a tela final.
+O login e o início da atividade são manuais, no perfil dedicado. Depois disso o loop trabalha sozinho até a tela final.
 
 ### Atalhos
 
@@ -212,8 +103,7 @@ flowchart LR
     F --> H[(runs/<br/>log e tempos)]
 ```
 
-Nas avaliações, a questão atual vem da faixa de navegação e do contador. Nas seções do curso, do bloco indicado pelo
-título da aba. Figuras relevantes são capturadas do elemento da questão e enviadas ao Claude junto com o texto, e a
+Em atividades em carrossel, a questão atual vem da faixa de navegação e do contador "N of M"; em atividades de página única, do bloco indicado pelo título da aba. Figuras relevantes são capturadas do elemento da questão e enviadas ao Claude junto com o texto, e a
 falta de uma figura exigida pausa o loop.
 
 ## Configuração
@@ -232,7 +122,7 @@ Formato `CHAVE=VALOR`.
 | `RETRY_ON_INCORRECT` | `1` | Reconsulta com o feedback nas seções do curso |
 | `KEEP_DAYS` | `7` | Idade máxima das pastas de execução |
 
-`CLICK_SUBMIT` nunca autoriza o envio final da avaliação.
+`CLICK_SUBMIT` nunca autoriza o envio final.
 
 ## Registros e privacidade
 
@@ -256,7 +146,7 @@ Era o defeito de ordem das opções, corrigido. Se voltar, atualize o repositór
 <details>
 <summary><b>"marcação não confirmada" depois de um <code>--dry-run</code></b></summary>
 
-Também corrigido: o dry-run não clica, então não há o que confirmar. A pausa ao fim da simulação é intencional.
+Corrigido: o dry-run não clica, então não há o que confirmar. A pausa ao fim da simulação é intencional.
 
 </details>
 
