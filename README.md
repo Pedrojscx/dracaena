@@ -46,7 +46,81 @@ Quanto ao comando, ele continua `quiz-*` por herança do `quiz-helper`. Renomear
 
 ## Como foi feito
 
-O DRACAENA foi desenvolvido com agentes de IA em papéis fixos, e a seção será detalhada adiante.
+O DRACAENA foi desenvolvido por um processo assistido por agentes de IA, com papéis separados e uma única pessoa decidindo
+o que entra. A separação existe por um motivo prático: quem lê logs e formula hipóteses não deve ser quem escreve o código
+e quem escreve o código não deve ser quem o aprova.
+
+| Papel | Quem | Responsabilidade |
+|---|---|---|
+| **Operador** | Pedro | Define o objetivo, executa a ferramenta num ambiente real, fornece logs e capturas e decide cada merge. |
+| **Analista e arquiteto** | Claude (conversa) | Inventaria o repositório, lê os registros de execução, formula e descarta hipóteses e redige a especificação de cada tarefa, com escopo e critérios de aceitação. |
+| **Executor** | Codex | Recebe uma especificação fechada, trabalha numa branch, faz um commit por item, roda a suíte e devolve um relatório. Não faz push. |
+| **Motor de resposta** | Claude Code | Roda dentro do produto: cada consulta é uma chamada `claude -p` isolada (ver [Motor de resposta isolado](#5-motor-de-resposta-isolado)). |
+
+O Claude Code aparece em dois lugares de propósito: fora do produto, ajudando a projetar e diagnosticar; dentro dele, como
+componente restrito e sem memória entre consultas.
+
+### Ciclo de trabalho
+
+Cada tarefa seguiu o mesmo ciclo de cinco passos:
+
+1. **Observação.** O operador roda a ferramenta num ambiente real e entrega o que viu: log, `questions.jsonl` e capturas.
+2. **Diagnóstico.** O analista lê `run.log`, `questions.jsonl` e as saídas cruas do Claude, isola a causa e confirma no código.
+3. **Especificação.** O analista escreve a tarefa com escopo, arquivos permitidos, testes exigidos e o que não pode mudar.
+4. **Execução.** O executor entrega uma branch com um commit por item e um relatório do que fez e do que não conseguiu fazer.
+5. **Aceitação.** O operador confere o relatório, roda a suíte, faz o merge e repete a execução real que originou a tarefa.
+
+O critério de aceitação de cada tarefa tem duas partes: a suíte offline passa (incluindo um teste novo que reproduz o
+defeito) e a situação real que o originou deixa de ocorrer. Sem as duas, a tarefa volta ao passo 2. Esse ciclo produziu,
+entre outras mudanças, a remoção do motor legado de OCR, as três correções abaixo e a deduplicação dos instaladores.
+
+### Defeitos encontrados em execução real
+
+Os três defeitos abaixo só apareceram com a ferramenta rodando contra a página de verdade. Cada um virou teste.
+
+<details>
+<summary><b>1. Dropdown com ordem de opções diferente de <code>data-index</code></b></summary>
+
+- **Sintoma.** O loop pausava com "dropdown não mostra a opção escolhida", embora a opção certa tivesse sido clicada.
+- **Causa raiz.** Na página, os `<li role=option>` de um dropdown podem vir numa ordem do DOM diferente do atributo
+  `data-index`. A extração em `lib/quizhelper/dom.py` guardava as opções na ordem do DOM, mas o clique usa `data-index` e
+  o contrato fala em índice. A conferência em `lib/quizhelper/actions.py` indexava a lista por posição (`options[o]`) e
+  olhava, portanto, a opção errada.
+- **Correção.** A extração ordena as opções por `data-index`, e a conferência passa a aceitar também o texto exibido no
+  botão do dropdown (`shown`), que não depende de `aria-selected` estar atualizado. Commit `6621504`.
+- **Teste.** `tests/py/test_dropdown.py`, com uma fixture em que a ordem do DOM é invertida: confere a ordenação, a seleção
+  sem pausa e o caso em que só o texto exibido confirma a escolha.
+
+</details>
+
+<details>
+<summary><b>2. Dry-run que acusava erro por esperar a confirmação de um clique inexistente</b></summary>
+
+- **Sintoma.** Em `--dry-run`, a simulação terminava com a pausa "marcação não confirmada".
+- **Causa raiz.** No modo de simulação a guarda não clica, mas o executor de ações ainda esperava que o DOM refletisse o
+  clique, e a conferência nunca podia passar.
+- **Correção.** Em `lib/quizhelper/actions.py`, a conferência é dada como satisfeita quando a guarda está em simulação.
+  Commit `f4eaa2e`.
+- **Teste.** `tests/py/test_dry_run.py` aplica uma resposta de cada tipo com a guarda em simulação e verifica que nenhum
+  clique aconteceu, que a página ficou intacta, que nenhuma espera foi feita e que o log tem uma linha por ação simulada.
+
+</details>
+
+<details>
+<summary><b>3. Diagnóstico que não reconhecia a flag do perfil</b></summary>
+
+- **Sintoma.** `quiz-doctor` reportava "navegador com perfil dedicado e porta configurada" como falha, com o navegador
+  aberto corretamente pelo `quiz-browser`.
+- **Causa raiz.** O diagnóstico lê `/proc/<pid>/cmdline` e comparava cada argumento separado por NUL. O Vivaldi reescreve a
+  linha de comando do processo principal como um texto único separado por espaços, então a comparação nunca encontrava
+  as flags.
+- **Correção.** `cmdline_matches`, em `lib/quizhelper/doctor.py`, aceita as duas formas, exige a flag com limites de
+  argumento (para `--remote-debugging-port=92220` não casar com 9222) e ignora processos auxiliares com `--type=`.
+  Commit `339bd43`. No formato de texto único, espaços em caminhos são ambíguos; o código registra essa limitação.
+- **Teste.** `CmdlineMatchesTest`, em `tests/py/test_doctor.py`: argumentos separados por NUL e por espaço, porta e perfil
+  diferentes, prefixo de valor, processo auxiliar e caracteres especiais no caminho.
+
+</details>
 
 ## Instalar
 
