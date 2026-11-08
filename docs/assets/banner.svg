@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 220" width="900" height="220" role="img" aria-labelledby="t d">
+  <title id="t">DRACAENA</title>
+  <desc id="d">Folha longa e pontiaguda, em verde, ao lado do nome DRACAENA e da legenda: automação de interface via Chrome DevTools Protocol.</desc>
+  <style>
+    .name { fill: #1f6b3d; }
+    .tag  { fill: #4b6b57; }
+    @media (prefers-color-scheme: dark) {
+      .name { fill: #5fd08a; }
+      .tag  { fill: #9fb8a8; }
+    }
+  </style>
+  <!-- folha: lâmina longa que termina em ponta -->
+  <g transform="translate(40 20)">
+    <path d="M0 170 C 40 120, 70 70, 120 25 C 135 12, 150 6, 160 0 C 158 14, 156 30, 150 52 C 130 108, 80 150, 18 178 Z"
+          fill="#2e9b57"/>
+    <path d="M0 170 C 40 120, 70 70, 120 25 C 135 12, 150 6, 160 0 C 150 20, 100 70, 50 128 C 34 146, 18 160, 0 170 Z"
+          fill="#1f7a43"/>
+    <path d="M4 168 C 50 118, 100 62, 158 4" fill="none" stroke="#9be0b3" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M40 130 l14 8 M62 106 l14 8 M84 82 l12 7 M106 58 l10 6" stroke="#b9ecc9" stroke-width="2" stroke-linecap="round" opacity=".8"/>
+  </g>
+  <text class="name" x="250" y="118" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="78" font-weight="700" letter-spacing="10">DRACAENA</text>
+  <text class="tag" x="254" y="158" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="22" letter-spacing="1.5">automação de interface via Chrome DevTools Protocol</text>
+</svg>
