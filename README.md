@@ -1,8 +1,8 @@
 <div align="center">
 
-<h1><img src="docs/assets/banner.svg" alt="DRACAENA" width="720"></h1>
+<h1><img src="docs/assets/banner.svg" alt="DRACAENA: banner escuro em verde com quatro folhas de espada de São Jorge e a frase Leitura precisa. Ação exata." width="800"></h1>
 
-**Lê a página sem ruído, decide pouco e age com exatidão.**
+**Automação de interface via Chrome DevTools Protocol: leitura estruturada do DOM, contrato de resposta validado, loop com pausa e instrumentação.**
 
 <img src="https://img.shields.io/badge/Python-3.10%2B-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
 <img src="https://img.shields.io/badge/Playwright-CDP-2ead33?style=flat-square&logo=playwright&logoColor=white" alt="Playwright via CDP">
