@@ -1,6 +1,6 @@
 <div align="center">
 
-<h1><img src="docs/assets/banner.svg" alt="DRACAENA: banner escuro em verde com um lótus em mandala de folhas de espada de São Jorge e o nome DRACAENA" width="800"></h1>
+<h1><img src="docs/assets/banner.svg" alt="DRACAENA: banner escuro com o ícone em verde de um lótus de folhas de espada de São Jorge e o nome DRACAENA" width="800"></h1>
 
 **Automação de interface via Chrome DevTools Protocol: leitura estruturada do DOM, contrato de resposta validado, loop com pausa e instrumentação.**
 
@@ -46,7 +46,7 @@ computador continua utilizável enquanto o loop roda.
 
 ## 🐉 Por que o nome?
 
-<img src="docs/assets/logo.svg" alt="Símbolo do DRACAENA: lótus em mandala feito de folhas de espada de São Jorge, em anéis de 21, 13, 8, 5 e 3 folhas" width="110" align="right">
+<img src="docs/assets/logo.svg" alt="Ícone do DRACAENA: lótus de folhas de espada de São Jorge, em anéis de 13, 8, 5 e 3 folhas, dentro de um quadrado de cantos contínuos em verde" width="110" align="right">
 
 *Dracaena* é o gênero da espada de São Jorge, *Dracaena trifasciata*, que durante muito tempo foi classificada como *Sansevieria*; análises genéticas mostraram que as sansevierias pertencem ao mesmo gênero. O nome científico vem do grego *drákaina*, "dragoa". O nome popular brasileiro nasce da folha: longa, rígida e pontiaguda, que sobe em lâmina, como uma espada fincada na terra.
 
