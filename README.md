@@ -1,6 +1,6 @@
 <div align="center">
 
-<h1><img src="docs/assets/banner.svg" alt="DRACAENA: banner escuro em verde com quatro folhas de espada de São Jorge trançadas e a frase Leitura precisa. Ação exata." width="800"></h1>
+<h1><img src="docs/assets/banner.svg" alt="DRACAENA: banner escuro em verde com quatro folhas de espada de São Jorge trançadas e o nome DRACAENA" width="800"></h1>
 
 **Automação de interface via Chrome DevTools Protocol: leitura estruturada do DOM, contrato de resposta validado, loop com pausa e instrumentação.**
 
