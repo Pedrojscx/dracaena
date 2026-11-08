@@ -23,9 +23,10 @@
 
 O DRACAENA é uma ferramenta em Python que se conecta, por Chrome DevTools Protocol, a um navegador já aberto, lê o
 estado de uma página como dados estruturados (iframe e shadow roots abertos), entrega o enunciado ao Claude Code em modo
-não interativo e aplica a resposta por uma guarda que concentra todas as ações. A resposta volta como JSON e só chega à
-página depois de passar por um contrato que valida índices, quantidade e formato. A ferramenta foi testada em atividades
-do NetAcad, que é só o ambiente de teste: nada na arquitetura depende dele além do módulo que conhece a estrutura da página.
+não interativo e aplica a resposta na página, conferindo o resultado de cada ação. A resposta volta como JSON e só chega à
+página depois de passar por um contrato que valida índices, quantidade e formato. Um loop com pausa cuida das situações
+inesperadas, e cada etapa é cronometrada. A ferramenta foi desenvolvida e testada no NetAcad, o ambiente em que a página
+real foi observada: só o módulo de leitura do DOM conhece a estrutura dele.
 
 Não há OCR, captura de tela para leitura nem automação de mouse. Como as ações saem pelo CDP e não movem o cursor, o
 computador continua utilizável enquanto o loop roda.
@@ -36,11 +37,10 @@ computador continua utilizável enquanto o loop roda.
 |---|---|
 | **Leitura pelo DOM** | Percorre o iframe `authoring-resources` e os shadow roots abertos. Reconhece `mcq-view` (resposta única e múltipla), `matching-view` / `matching-dropdown-view` (listas de seleção) e `object-matching-view` (associação). |
 | **Contrato de resposta** | O Claude responde em JSON de quatro tipos: `SINGLE`, `MULTI`, `DROPDOWN` e `MATCH`. Índices fora do intervalo, quantidade errada ou resposta mal formada derivam para uma segunda tentativa, nunca para um clique. |
-| **Guarda de cliques** | Um único ponto aplica toda ação. Bloqueia o envio final, a confirmação de envio, Skip All, Skip Question e a tela final, e confere o alvo antes de agir. |
 | **Loop com pausa** | `SUPER+P` inicia, pausa e retoma. Qualquer situação inesperada (atividade nova, figura ausente, marcação não confirmada) pausa e notifica, em vez de insistir. |
-| **Segunda tentativa** | Nas seções do curso, que mostram feedback de acerto, a ferramenta reconsulta o Claude com o feedback, usa Reset e responde de novo. |
+| **Segunda tentativa** | Onde a página mostra feedback de acerto, a ferramenta reconsulta o Claude com o feedback, usa Reset e responde de novo. |
 | **Dry-run** | `--dry-run` lê, consulta o Claude e simula os cliques sem tocar na página. |
-| **Cronometragem** | Cada questão registra o tempo de leitura do DOM, do Claude, das ações, do Submit, da espera de avanço e do restante. `python -m quizhelper timings` resume tudo (rode com o Python do venv e `PYTHONPATH=lib`). |
+| **Cronometragem** | Cada questão registra o tempo de leitura do DOM, do Claude, das ações, do Submit, da espera de avanço e do restante. `python -m quizhelper timings <pasta da execução>` resume tudo (rode com o Python do venv e `PYTHONPATH=lib`). |
 | **Diagnóstico** | `quiz-doctor` confere venv, Playwright, Claude, prompts, symlinks, perfil, porta, endpoint CDP, aba, iframe e a leitura de uma questão, sem clicar e sem gastar cota. |
 | **Privacidade** | Execuções em pastas `700` e arquivos `600`, credenciais reportadas só como `definida` ou `ausente`, CDP somente em loopback. |
 
@@ -95,7 +95,7 @@ Os três defeitos abaixo só apareceram com a ferramenta rodando contra a págin
 
 - **Sintoma.** O loop pausava com "dropdown não mostra a opção escolhida", embora a opção certa tivesse sido clicada.
 - **Causa raiz.** Na página, os `<li role=option>` de um dropdown podem vir numa ordem do DOM diferente do atributo
-  `data-index`. A extração em `lib/quizhelper/dom.py` guardava as opções na ordem do DOM, mas o clique usa `data-index` e
+  `data-index`. A extração em `lib/quizhelper/dom.py` mantinha as opções na ordem do DOM, mas o clique usa `data-index` e
   o contrato fala em índice. A conferência em `lib/quizhelper/actions.py` indexava a lista por posição (`options[o]`) e
   olhava, portanto, a opção errada.
 - **Correção.** A extração ordena as opções por `data-index`, e a conferência passa a aceitar também o texto exibido no
@@ -364,7 +364,7 @@ quiz-loop --dry-run # lê e consulta o Claude, mas não clica
 quiz-loop           # responde de verdade
 ```
 
-O login e o início da atividade são manuais, no perfil dedicado. Depois disso o loop trabalha sozinho até a tela final.
+O login e o início da atividade são manuais, no perfil dedicado. Depois disso o loop trabalha sozinho até o fim da atividade.
 
 <details>
 <summary>Exemplo ilustrativo de saída do diagnóstico</summary>
@@ -419,9 +419,8 @@ flowchart LR
     C --> D[claude -p<br/>sem ferramentas]
     D --> E{Contrato<br/>JSON}
     E -- inválido --> D
-    E -- válido --> F[Guarda de cliques]
+    E -- válido --> F[Aplicação da resposta<br/>cliques pelo DOM]
     F --> A
-    F -. bloqueia .-> G[Envio final, Skip,<br/>tela final]
     F --> H[(runs/<br/>log e tempos)]
 ```
 
@@ -441,10 +440,9 @@ Formato `CHAVE=VALOR`.
 | `CDP_PORT` | `9222` | Porta do DevTools, sempre em `127.0.0.1` |
 | `BROWSER_BIN` | `vivaldi-stable` | Navegador aberto pelo `quiz-browser` |
 | `CLICK_SUBMIT` | `1` | `1` envia a questão atual; `0` marca e pausa |
-| `RETRY_ON_INCORRECT` | `1` | Reconsulta com o feedback nas seções do curso |
+| `RETRY_ON_INCORRECT` | `1` | Reconsulta com o feedback onde a página o mostra |
 | `KEEP_DAYS` | `7` | Idade máxima das pastas de execução |
 
-`CLICK_SUBMIT` nunca autoriza o envio final.
 
 ---
 
@@ -504,7 +502,7 @@ leitor depende da estrutura atual da página, e uma mudança de lá pode exigir 
 ```sh
 PYTHON="${XDG_DATA_HOME:-$HOME/.local/share}/quiz-helper/venv/bin/python"
 "$PYTHON" -m pip install -r requirements-dev.txt
-"$PYTHON" -m playwright install --only-shell chromium   # só para os testes da guarda
+"$PYTHON" -m playwright install --only-shell chromium   # só para os testes de DOM
 tests/run.sh
 ```
 
