@@ -32,7 +32,8 @@ def header(cid: str, title: str, stem: str, instruction: str = "") -> str:
              f'<span class="accessibility-completion-indicator">Incomplete</span>{E(title)}</div></div>'
              f'<div class="component__content"><div tabindex="0" class="component__body"><div class="component__body-inner">'
              f'<p><span>{E(stem)}</span></p></div></div></div>{instr}</div></div></div>')
-    return f'<div class="component__header-container">{shadow("base-view", inner, "type=\"component\"")}</div>'
+    attrs = 'type="component"'
+    return f'<div class="component__header-container">{shadow("base-view", inner, attrs)}</div>'
 
 
 def buttons_view() -> str:
