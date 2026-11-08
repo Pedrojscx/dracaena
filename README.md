@@ -122,6 +122,190 @@ Os três defeitos abaixo só apareceram com a ferramenta rodando contra a págin
 
 </details>
 
+## Arquitetura e decisões técnicas
+
+Cada subseção aponta o arquivo onde o assunto vive e explica o porquê da escolha. O princípio comum: uma falha de
+interpretação, de leitura ou de rede deve terminar em pausa, nunca numa ação irreversível.
+
+```mermaid
+sequenceDiagram
+    actor Op as Operador
+    participant Sh as Atalho quiz-loop
+    participant Lp as Loop
+    participant Dm as Leitor de DOM
+    participant Mt as Motor de resposta
+    participant Ct as Contrato
+    participant Gd as Guarda
+    participant Pg as Página
+
+    Op->>Sh: SUPER+P
+    Sh->>Lp: inicia ou alterna pausa
+    loop para cada questão
+        Lp->>Dm: localizar e extrair
+        Dm->>Pg: lê iframe e shadow roots
+        Pg-->>Dm: componente atual
+        Dm-->>Lp: questão com índices
+        Lp->>Mt: claude -p isolado
+        Mt-->>Lp: texto com JSON
+        Lp->>Ct: validar contra a questão
+        alt resposta inválida
+            Ct-->>Lp: motivo da rejeição
+            Lp->>Mt: segunda tentativa com o motivo
+        else resposta válida
+            Ct-->>Lp: resposta normalizada
+            Lp->>Gd: ação permitida?
+            Gd->>Pg: confere o alvo e clica
+            Pg-->>Gd: estado após o clique
+            Gd-->>Lp: confirmado ou recusado
+        end
+    end
+    Lp-->>Op: notificação de pausa ou fim
+```
+
+### 1. Conexão por CDP
+
+*Arquivos: `lib/quizhelper/browser.py`, `lib/quizhelper/cdp.py`, `bin/quiz-browser`.*
+
+O Playwright se conecta a um navegador já aberto com `connect_over_cdp`, em vez de lançar um navegador próprio. Assim a
+sessão autenticada do perfil é reaproveitada, nenhum movimento de mouse é necessário e o computador fica livre durante o
+loop. O navegador roda num perfil dedicado (`vivaldi-profile`, na pasta de dados), porque o Chromium 136 em diante ignora a
+depuração remota no perfil padrão. A porta fica em `127.0.0.1`: o `quiz-browser` passa `--remote-debugging-address=127.0.0.1`,
+confere com `ss` quem está escutando, recusa subir se a porta já escuta em outro endereço e fecha o navegador que ele abriu se a
+porta escutar fora do loopback durante a subida. `cdp.py` valida o `/json/version` sem seguir redirects nem proxies e exige um WebSocket de
+loopback na mesma porta.
+
+### 2. Leitura do DOM
+
+*Arquivo: `lib/quizhelper/dom.py`.*
+
+A página da atividade é um iframe que usa shadow DOM aberto. O leitor injeta um pequeno conjunto de funções JavaScript que
+atravessa o documento e todos os shadow roots, localiza a questão atual (pela faixa de navegação e o contador em carrossel,
+ou pelo título da aba em página única) e reconhece o componente: `mcq-view`, `matching-view` com `matching-dropdown-view` e
+`object-matching-view`. As opções de alternativas são ordenadas por `aria-posinset` e as de dropdown por `data-index`. Posição
+na lista e índice do atributo são coisas diferentes, e misturá-las foi justamente o defeito 1 da seção anterior: o contrato,
+o clique e a conferência precisam falar o mesmo índice. Ler o DOM no lugar de fazer OCR entrega texto exato e estado dos
+controles (marcado, selecionado, desabilitado) sem erro de reconhecimento; nos registros locais, a leitura leva em média
+alguns milissegundos por questão. O caminho de OCR foi removido do repositório (commit `131366c`).
+
+### 3. Contrato de resposta
+
+*Arquivos: `lib/quizhelper/contract.py`, `prompts/answer.txt`.*
+
+O Claude responde em JSON de quatro tipos, sempre por índice, nunca por casamento aproximado de texto. Formato pedido em
+`prompts/answer.txt`, com valores de exemplo:
+
+```json
+{"type":"SINGLE","answers":[2]}
+{"type":"MULTI","answers":[0,3]}
+{"type":"DROPDOWN","items":[{"item":0,"option":1},{"item":1,"option":0}]}
+{"type":"MATCH","pairs":[{"right":0,"left":"C"},{"right":1,"left":"A"}]}
+```
+
+`parse_validated` extrai da saída o último objeto JSON que passa na validação (o modelo pode raciocinar em até três linhas
+antes) e `validate` confere: tipo igual ao da questão, inteiros, índices dentro do intervalo, sem repetição, quantidade
+igual à pedida, todos os itens de dropdown respondidos e todas as linhas da direita ligadas a uma letra existente.
+Uma resposta rejeitada gera uma segunda consulta com o motivo (`prompts/invalid.txt`); se falhar de novo, o loop pausa.
+A resposta inválida nunca chega à guarda, porque um índice errado seria um clique errado.
+
+### 4. Guarda de cliques
+
+*Arquivos: `lib/quizhelper/guard.py`, `lib/quizhelper/actions.py`.*
+
+`Guard.click` é o único ponto de ação na página. Antes de cada clique, um verificador no navegador aplica, nesta ordem:
+tela de envio visível, bloqueios explícitos (envio final, confirmação, `input` e `label`, Skip All, Skip Question,
+navegação entre itens, a lista de palavras `SUBMIT_WORDS_BLOCKLIST`) e uma lista de permissão (alternativa, botão de
+dropdown, opção de dropdown, botões de associação, e o Submit e o Reset do componente atual). Tudo fora da lista é recusado,
+com o seletor registrado no log. Depois o clique só acontece se o elemento no centro do alvo for o próprio alvo ou um
+descendente dele. A razão do desenho: se o modelo ou o leitor errarem, o pior caso é uma recusa, não um envio. Um teste
+(`SourceTests`) falha se qualquer outro módulo chamar métodos de ação do Playwright. Em `--dry-run` a mesma guarda faz
+as mesmas verificações e, em vez de clicar, registra "(dry-run) clicaria"; o `Actor` não espera confirmação nesse modo.
+
+### 5. Motor de resposta isolado
+
+*Arquivo: `lib/quizhelper/claude.py`.*
+
+Cada questão é uma chamada `claude -p` independente, sem estado entre elas, executada numa pasta vazia do diretório de
+execução. As flags restritivas: `--tools ""` (sem ferramentas), `--strict-mcp-config` (sem MCP), `--no-chrome` (sem
+navegador), `--disable-slash-commands`, `--no-session-persistence` (nada fica salvo) e `--safe-mode` (sem `CLAUDE.md`,
+plugins nem hooks), com um prompt de sistema curto em `prompts/system.txt`. O modelo não tem como agir, e a resposta de uma
+questão não contamina a próxima. O `--bare` não é usado, porque nele a autenticação exigiria `ANTHROPIC_API_KEY` e o login
+OAuth deixaria de valer. O comentário do módulo registra a medição da época: média de 4,5 s para 3,3 s por consulta, com a
+mesma resposta.
+
+### 6. Máquina de estados do loop
+
+*Arquivo: `lib/quizhelper/loop.py`.*
+
+O loop alterna entre **rodando**, **pausado** e **encerrado**. `SUPER+P` (SIGUSR1) alterna rodando e pausado; SIGTERM e
+SIGINT encerram. O loop também entra em pausa e notifica, com urgência crítica, quando surge uma atividade nova (o título
+da aba mudou), quando uma figura exigida pelo enunciado não pôde ser capturada, quando uma marcação não é confirmada duas
+vezes, quando a guarda recusa, quando a resposta é inválida duas vezes ou quando o Claude falha. Pausas automáticas terminam
+sozinhas se a questão mudar (o operador respondeu à mão); pausas do usuário só terminam com `SUPER+P`. Pausar é preferível
+a insistir porque insistir, num estado que a ferramenta não entende, é como se repetem erros e envios. O encerramento acontece
+sem clicar: tela de envio, tela de resultado, atividade concluída ou `MAX_QUESTIONS`. Uma questão já enviada nunca é reenviada
+(`last_key`). Onde a página mostra feedback e há `RETRY_ON_INCORRECT=1`, uma resposta marcada como errada gera uma segunda
+tentativa com o feedback (`prompts/retry.txt`), depois de usar o Reset do componente.
+
+### 7. Instrumentação
+
+*Arquivos: `lib/quizhelper/loop.py`, `lib/quizhelper/cli.py`.*
+
+Um `Timer` mede, por questão, a leitura do DOM, o Claude, as ações, o Submit, a espera de avanço e a espera de feedback, e
+soma o que está fora do Claude. O resultado vai para o campo `timing` de cada linha de `questions.jsonl`, na pasta
+`runs/<data>/` do diretório de dados, e para o `run.log`. `python -m quizhelper timings <pasta da execução>` imprime uma
+tabela por questão e etapa; `summary` agrega por tipo. Os números mostraram que a consulta ao modelo ocupa cerca de 92% do tempo
+de cada questão, então a otimização foi feita nela (modelo leve, flags restritivas, prompt curto) e não na automação, que
+soma uma fração de segundo.
+
+### 8. Segurança e privacidade
+
+*Arquivos: `lib/quizhelper/private.py`, `lib/quizhelper/redact.py`, `tests/check_publication.py`.*
+
+Pastas novas nascem `700` e arquivos `600` (`private.py`, que também recusa abrir symlink em escrita). Diagnósticos mostram
+credenciais só como `definida` ou `ausente` (`redact.py`), e erros do subprocesso passam pelo mesmo filtro. O CDP escuta
+só em loopback.
+
+> [!WARNING]
+> A porta de depuração controla um perfil autenticado. Mesmo em loopback, qualquer processo local que a alcance tem esse poder.
+> Não a exponha nem a encaminhe.
+
+Antes de publicar, `tests/check_publication.py` procura arquivos cobertos pelo `.gitignore` que estejam rastreados ou novos
+e padrões de credenciais (tokens do GitHub, chaves `sk-`/`AKIA`, chaves privadas e atribuições do tipo `password = "..."`),
+sem imprimir os valores encontrados. Ele não substitui revisão humana.
+
+### 9. Instalação idempotente
+
+*Arquivos: `install.sh`, `lib/sh/common.sh`.*
+
+O instalador cria um venv privado na pasta de dados, instala as dependências de `requirements.txt` nele, cria links
+simbólicos em `~/.local/bin` e copia a configuração inicial. Pode ser repetido sem efeito colateral. De propósito, não usa
+`sudo`, não instala pacotes do sistema nem navegador, não sobrescreve a configuração pessoal e não edita o Hyprland (apenas
+imprime as linhas dos atalhos). Atalhos do Hyprland não herdam o `PATH` do terminal, então o instalador grava o caminho do
+`claude` em `~/.config/quiz-helper/paths`, lido depois dos padrões do repositório e antes da configuração pessoal.
+
+### 10. Estratégia de testes
+
+*Arquivos: `tests/run.sh`, `tests/py/`, `tests/fixtures/`, `.github/workflows/checks.yml`.*
+
+As páginas de teste são fixtures HTML sintéticas, geradas por `tests/fixtures/derived.py` com as tags e atributos que o leitor
+espera, e um simulador (`sim.js`) reproduz marcar, Submit e avanço. Elas rodam num Chromium headless do Playwright. Os comandos
+externos (`ss`, `curl`, navegador, `claude`) são simulados, e cada execução usa um `HOME` temporário. `tests/run.sh` roda o
+ShellCheck, a compilação Python, o `unittest` e a verificação de publicação; a CI executa a mesma suíte em Python 3.10 e 3.14.
+A suíte não cobre uma conta real, o modelo real nem mudanças futuras no site: o teste de que a ferramenta funciona contra a
+página de verdade continua sendo manual, com `quiz-doctor` e `--dry-run`.
+
+### Decisões e alternativas
+
+| Decisão | Alternativa descartada | Motivo |
+|---|---|---|
+| Conectar a um navegador aberto por CDP | Lançar um navegador próprio | Reaproveita a sessão autenticada e não mexe no mouse |
+| Ler o DOM | OCR sobre captura de tela | Texto e estado exatos; o OCR foi removido (`131366c`) |
+| Resposta por índice, validada | Casar o texto da resposta de forma aproximada | Um índice fora do intervalo é detectável; um texto parecido não é |
+| Um único ponto de ação | Cliques espalhados pelos módulos | Um teste garante que só `guard.py` age na página |
+| Clique feito no DOM, no elemento sob o alvo | Eventos de mouse do Playwright | Não depende de a aba estar sendo desenhada nem do cursor |
+| Uma chamada `claude -p` por questão, sem ferramentas | Sessão persistente do Claude Code com ferramentas | Sem estado entre questões e menor latência medida |
+| Pausar diante do inesperado | Repetir a ação até dar certo | Evita cliques repetidos ou fora de lugar |
+
 ## Instalar
 
 Requisitos: Python 3.10+ com `venv`, Bash, `curl`, `ss`, `flock` e `setsid`, Vivaldi (`vivaldi-stable`) e o Claude Code
