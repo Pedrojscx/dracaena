@@ -68,8 +68,8 @@ e quem escreve o código não deve ser quem o revisa.
 |---|---|---|
 | **Operador** | Pedro | Define o objetivo, executa a ferramenta num ambiente real, fornece logs e capturas e decide cada merge. |
 | **Analista e arquiteto** | Claude (conversa) | Inventaria o repositório, lê os registros de execução, formula e descarta hipóteses e redige a especificação de cada tarefa, com escopo e critérios de aceitação. |
-| **Executor** | Codex | Recebe uma especificação fechada, trabalha numa branch, faz um commit por item, roda a suíte e devolve um relatório. Não faz push. |
-| **Motor de resposta** | Claude Code | Roda dentro do produto: cada consulta é uma chamada `claude -p` isolada (ver [Motor de resposta isolado](#5-motor-de-resposta-isolado)). |
+| **Executor** | Codex <!-- confirmar com o autor --> | Recebe uma especificação fechada, trabalha numa branch, faz um commit por item, roda a suíte e devolve um relatório. Não faz push. |
+| **Motor de resposta** | Claude Code | Roda dentro do produto: cada consulta é uma chamada `claude -p` isolada (ver [Motor de resposta isolado](#4-motor-de-resposta-isolado)). |
 
 O Claude Code aparece em dois lugares de propósito: fora do produto, ajudando a projetar e diagnosticar; dentro dele, como
 componente restrito e sem memória entre consultas.
@@ -111,11 +111,11 @@ Os três defeitos abaixo só apareceram com a ferramenta rodando contra a págin
 <summary><b>2. Dry-run que acusava erro por esperar a confirmação de um clique inexistente</b></summary>
 
 - **Sintoma.** Em `--dry-run`, a simulação terminava com a pausa "marcação não confirmada".
-- **Causa raiz.** No modo de simulação a guarda não clica, mas o executor de ações ainda esperava que o DOM refletisse o
+- **Causa raiz.** No modo de simulação nada é clicado, mas o executor de ações (`Actor`) ainda esperava que o DOM refletisse o
   clique, e a conferência nunca podia passar.
-- **Correção.** Em `lib/quizhelper/actions.py`, a conferência é dada como satisfeita quando a guarda está em simulação.
+- **Correção.** Em `lib/quizhelper/actions.py`, a conferência é dada como satisfeita quando o modo de simulação está ativo.
   Commit `f4eaa2e`.
-- **Teste.** `tests/py/test_dry_run.py` aplica uma resposta de cada tipo com a guarda em simulação e verifica que nenhum
+- **Teste.** `tests/py/test_dry_run.py` aplica uma resposta de cada tipo em modo de simulação e verifica que nenhum
   clique aconteceu, que a página ficou intacta, que nenhuma espera foi feita e que o log tem uma linha por ação simulada.
 
 </details>
