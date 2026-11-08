@@ -141,7 +141,7 @@ Os três defeitos abaixo só apareceram com a ferramenta rodando contra a págin
 ## 🧱 Arquitetura e decisões técnicas
 
 Cada subseção aponta o arquivo onde o assunto vive e explica o porquê da escolha. O princípio comum: uma falha de
-interpretação, de leitura ou de rede deve terminar em pausa, nunca numa ação irreversível.
+interpretação, de leitura ou de rede deve terminar em pausa e notificação, não em insistência.
 
 ```mermaid
 sequenceDiagram
@@ -151,7 +151,6 @@ sequenceDiagram
     participant Dm as Leitor de DOM
     participant Mt as Motor de resposta
     participant Ct as Contrato
-    participant Gd as Guarda
     participant Pg as Página
 
     Op->>Sh: SUPER+P
@@ -169,10 +168,8 @@ sequenceDiagram
             Lp->>Mt: segunda tentativa com o motivo
         else resposta válida
             Ct-->>Lp: resposta normalizada
-            Lp->>Gd: ação permitida?
-            Gd->>Pg: confere o alvo e clica
-            Pg-->>Gd: estado após o clique
-            Gd-->>Lp: confirmado ou recusado
+            Lp->>Pg: aplica a resposta pelo DOM
+            Pg-->>Lp: estado após cada ação
         end
     end
     Lp-->>Op: notificação de pausa ou fim
@@ -221,22 +218,9 @@ O Claude responde em JSON de quatro tipos, sempre por índice, nunca por casamen
 antes) e `validate` confere: tipo igual ao da questão, inteiros, índices dentro do intervalo, sem repetição, quantidade
 igual à pedida, todos os itens de dropdown respondidos e todas as linhas da direita ligadas a uma letra existente.
 Uma resposta rejeitada gera uma segunda consulta com o motivo (`prompts/invalid.txt`); se falhar de novo, o loop pausa.
-A resposta inválida nunca chega à guarda, porque um índice errado seria um clique errado.
+A resposta inválida nunca chega à página, porque um índice errado seria um clique errado.
 
-### 4. Guarda de cliques
-
-*Arquivos: `lib/quizhelper/guard.py`, `lib/quizhelper/actions.py`.*
-
-`Guard.click` é o único ponto de ação na página. Antes de cada clique, um verificador no navegador aplica, nesta ordem:
-tela de envio visível, bloqueios explícitos (envio final, confirmação, `input` e `label`, Skip All, Skip Question,
-navegação entre itens, a lista de palavras `SUBMIT_WORDS_BLOCKLIST`) e uma lista de permissão (alternativa, botão de
-dropdown, opção de dropdown, botões de associação, e o Submit e o Reset do componente atual). Tudo fora da lista é recusado,
-com o seletor registrado no log. Depois o clique só acontece se o elemento no centro do alvo for o próprio alvo ou um
-descendente dele. A razão do desenho: se o modelo ou o leitor errarem, o pior caso é uma recusa, não um envio. Um teste
-(`SourceTests`) falha se qualquer outro módulo chamar métodos de ação do Playwright. Em `--dry-run` a mesma guarda faz
-as mesmas verificações e, em vez de clicar, registra "(dry-run) clicaria"; o `Actor` não espera confirmação nesse modo.
-
-### 5. Motor de resposta isolado
+### 4. Motor de resposta isolado
 
 *Arquivo: `lib/quizhelper/claude.py`.*
 
@@ -248,19 +232,30 @@ questão não contamina a próxima. O `--bare` não é usado, porque nele a aute
 OAuth deixaria de valer. O comentário do módulo registra a medição da época: média de 4,5 s para 3,3 s por consulta, com a
 mesma resposta.
 
-### 6. Máquina de estados do loop
+### 5. Máquina de estados do loop
 
 *Arquivo: `lib/quizhelper/loop.py`.*
 
 O loop alterna entre **rodando**, **pausado** e **encerrado**. `SUPER+P` (SIGUSR1) alterna rodando e pausado; SIGTERM e
 SIGINT encerram. O loop também entra em pausa e notifica, com urgência crítica, quando surge uma atividade nova (o título
 da aba mudou), quando uma figura exigida pelo enunciado não pôde ser capturada, quando uma marcação não é confirmada duas
-vezes, quando a guarda recusa, quando a resposta é inválida duas vezes ou quando o Claude falha. Pausas automáticas terminam
+vezes, quando a resposta é inválida duas vezes ou quando o Claude falha. Pausas automáticas terminam
 sozinhas se a questão mudar (o operador respondeu à mão); pausas do usuário só terminam com `SUPER+P`. Pausar é preferível
-a insistir porque insistir, num estado que a ferramenta não entende, é como se repetem erros e envios. O encerramento acontece
-sem clicar: tela de envio, tela de resultado, atividade concluída ou `MAX_QUESTIONS`. Uma questão já enviada nunca é reenviada
+a insistir porque insistir, num estado que a ferramenta não entende, é como se repetem erros. O encerramento acontece
+quando a atividade termina (tela de resultado ou atividade concluída) ou ao atingir `MAX_QUESTIONS`. Uma questão já enviada nunca é reenviada
 (`last_key`). Onde a página mostra feedback e há `RETRY_ON_INCORRECT=1`, uma resposta marcada como errada gera uma segunda
 tentativa com o feedback (`prompts/retry.txt`), depois de usar o Reset do componente.
+
+### 6. Dry-run
+
+*Arquivos: `lib/quizhelper/guard.py`, `lib/quizhelper/actions.py`, `lib/quizhelper/loop.py`.*
+
+Com `--dry-run`, o loop executa o caminho inteiro (leitura, consulta ao Claude, validação e aplicação), mas toda ação passa
+por `Guard.click` com `dry_run=True`, que em vez de clicar registra uma linha "(dry-run) clicaria: ..." no log. Reaproveitar o
+mesmo caminho das ações reais, em vez de um modo de simulação separado, faz o dry-run exercitar de verdade a localização
+dos elementos. Como nada muda na página, o `Actor` não espera confirmação nesse modo (esse foi o defeito 2). Ao fim da
+questão, o loop grava o registro com o veredito "dry-run (nada enviado)" e pausa. O teste `tests/py/test_dry_run.py` confere
+que nenhum clique acontece, que o DOM não muda e que há uma linha de log por ação simulada.
 
 ### 7. Instrumentação
 
@@ -317,9 +312,9 @@ página de verdade continua sendo manual, com `quiz-doctor` e `--dry-run`.
 | Conectar a um navegador aberto por CDP | Lançar um navegador próprio | Reaproveita a sessão autenticada e não mexe no mouse |
 | Ler o DOM | OCR sobre captura de tela | Texto e estado exatos; o OCR foi removido (`131366c`) |
 | Resposta por índice, validada | Casar o texto da resposta de forma aproximada | Um índice fora do intervalo é detectável; um texto parecido não é |
-| Um único ponto de ação | Cliques espalhados pelos módulos | Um teste garante que só `guard.py` age na página |
 | Clique feito no DOM, no elemento sob o alvo | Eventos de mouse do Playwright | Não depende de a aba estar sendo desenhada nem do cursor |
 | Uma chamada `claude -p` por questão, sem ferramentas | Sessão persistente do Claude Code com ferramentas | Sem estado entre questões e menor latência medida |
+| Dry-run pelo mesmo caminho das ações reais | Um modo de simulação separado | O teste cobre o código que roda de verdade |
 | Pausar diante do inesperado | Repetir a ação até dar certo | Evita cliques repetidos ou fora de lugar |
 
 ## 🚀 Desempenho
