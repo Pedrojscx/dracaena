@@ -512,12 +512,9 @@ Convenções do projeto: uma branch por tarefa, um commit por item, nada de `git
 
 ## 🤝 Uso responsável
 
-O DRACAENA automatiza a interação com uma plataforma de ensino. Usá-lo em avaliações pode violar os termos de uso da
-plataforma e as regras da sua instituição, com consequências acadêmicas que são só de quem o usa. A ferramenta bloqueia o
-envio final por segurança, mas isso não a torna adequada para esse fim. Use-a em atividades de estudo e em contas e cursos
-onde você tem autorização para isso.
-
-O projeto ainda não tem licença definida, então por padrão todos os direitos são reservados.
+O DRACAENA automatiza a interação com uma plataforma de ensino. O seu uso, inclusive em avaliações, pode violar os termos da
+Cisco Networking Academy e as regras da instituição de quem o usa, com consequências que são só dessa pessoa. A
+responsabilidade pelo uso é inteiramente de quem o executa.
 
 ---
 
