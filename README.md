@@ -57,8 +57,6 @@ Jorge foi um soldado romano de origem capadócia, oficial de bravura reconhecida
 
 Sobre ele corre a **lenda** que a Idade Média tornou célebre, e que não pertence à história documentada: um cavaleiro de armadura reluzente, lança em punho, avança sozinho contra o dragão que aterrorizava uma cidade e não recua diante do monstro. É uma imagem de coragem, contada e recontada por séculos, e é como imagem, com respeito, que ela entra aqui.
 
-No projeto, o dragão é a questão que parece grande demais; a lança é a ação precisa: leitura limpa da página, decisão curta, execução exata. Já o comando continua `quiz-*` por herança do `quiz-helper`: nem todo dragão merece uma refatoração completa.
-
 ---
 
 ## 🧪 Como foi feito
