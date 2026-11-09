@@ -509,6 +509,21 @@ continua sendo manual, com `quiz-doctor` e `--dry-run`.
 
 ---
 
+## 🚀 Desempenho
+
+Os valores abaixo vêm dos registros locais de `questions.jsonl` (execuções reais, sem contar dry-run). Esses registros ficam
+fora do Git, então os números, arredondados, não podem ser reproduzidos a partir do repositório.
+
+| Métrica | Valor |
+|---|---|
+| Tempo médio por questão | cerca de 4,5 s |
+| Parcela desse tempo na consulta ao modelo | cerca de 90% |
+
+O que sobra (ler o DOM, agir e esperar o avanço) é pequeno perto da consulta, então o ganho de velocidade está na escolha
+do modelo (`MODEL` e `RETRY_MODEL` na configuração) e no tamanho do prompt, não na automação.
+
+---
+
 ## 📦 Instalar
 
 Requisitos: Python 3.10+ com `venv`, Bash, `curl`, `ss`, `flock` e `setsid`, Vivaldi (`vivaldi-stable`) e o Claude Code
@@ -690,9 +705,10 @@ Convenções do projeto: uma branch por tarefa, um commit por item, nada de `git
 
 ## 🤝 Uso responsável
 
-O DRACAENA automatiza a interação com uma plataforma de ensino. O seu uso, inclusive em avaliações, pode violar os termos da
-Cisco Networking Academy e as regras da instituição de quem o usa, com consequências que são só dessa pessoa. A
-responsabilidade pelo uso é inteiramente de quem o executa.
+> [!IMPORTANT]
+> O DRACAENA automatiza a interação com uma plataforma de ensino. Esse uso, inclusive em avaliações, pode violar os termos de
+> uso da Cisco Networking Academy e as regras da instituição de quem o usa, com consequências que recaem só sobre essa
+> pessoa. A responsabilidade pelo uso é inteiramente de quem executa a ferramenta, e não há garantia de resultado.
 
 ---
 
