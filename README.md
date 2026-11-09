@@ -39,6 +39,20 @@ Como os cliques saem por CDP e não movem o cursor, o computador continua utiliz
 | **Diagnóstico** | `quiz-doctor` confere venv, Playwright, Claude, prompts, symlinks, perfil, porta, endpoint CDP, aba, iframe e a leitura de uma questão, sem clicar e sem consultar o Claude. |
 | **Privacidade** | Execuções em pastas `700` e arquivos `600`, credenciais reportadas só como `definida` ou `ausente`, CDP somente em loopback. |
 
+## 🐉 Por que o nome?
+
+<img src="docs/assets/logo.svg" alt="Símbolo do DRACAENA: quatro folhas de espada de São Jorge em pé, em duas colunas e duas linhas, dentro de uma moldura dourada" width="110" align="right">
+
+*Dracaena* é o gênero da espada de São Jorge (*Dracaena trifasciata*), planta que por muito tempo levou o nome de *Sansevieria*; a genética mostrou, em 2017, que as sansevierias são uma linhagem suculenta dentro do próprio gênero. O nome científico vem do grego *drákaina*, "dragoa", e costuma ser ligado à resina vermelha, o "sangue de dragão", que algumas espécies do gênero produzem. O nome popular brasileiro nasce da folha: longa, rígida e pontiaguda, ela sobe em lâmina, como uma espada fincada na terra.
+
+Jorge foi um soldado romano de origem capadócia, oficial de bravura reconhecida que, por volta do ano 303, sob o imperador Diocleciano, preferiu o martírio a renegar a fé. Desde então é lembrado como mártir e como cavaleiro, padroeiro de soldados e cavaleiros e de nações como a Inglaterra. A devoção chegou ao Brasil pelas mãos de Portugal, e o seu dia é 23 de abril.
+
+Sobre ele corre a **lenda** que a Idade Média tornou célebre, e que não pertence à história documentada: um cavaleiro de armadura reluzente, lança em punho, avança sozinho contra o dragão que aterrorizava uma cidade e não recua diante do monstro. É uma imagem de coragem, contada e recontada por séculos, e é como imagem, com respeito, que ela entra aqui.
+
+No projeto, o dragão é a questão que parece grande demais; a lança é a ação precisa: leitura limpa da página, decisão curta, execução exata. Já o comando continua `quiz-*` por herança do `quiz-helper`: nem todo dragão merece uma refatoração completa.
+
+---
+
 ## 📦 Instalar
 
 Requisitos: Python 3.10+ com `venv`, Bash, `curl`, `ss`, `flock` e `setsid`, Vivaldi (`vivaldi-stable`) e o Claude Code
