@@ -4,6 +4,14 @@
 
 **Automação de interface via Chrome DevTools Protocol: leitura estruturada do DOM, contrato de resposta validado, loop com pausa e instrumentação.**
 
+<img src="https://img.shields.io/badge/Python-3.10%2B-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
+<img src="https://img.shields.io/badge/Playwright-CDP-2ead33?style=flat-square&logo=playwright&logoColor=white" alt="Playwright via CDP">
+<a href="https://github.com/Pedrojscx/dracaena/actions/workflows/checks.yml"><img src="https://github.com/Pedrojscx/dracaena/actions/workflows/checks.yml/badge.svg" alt="CI: Offline checks"></a>
+<img src="https://img.shields.io/badge/idioma-pt--BR-13204a?style=flat-square" alt="Idioma pt-BR">
+<img src="https://img.shields.io/badge/status-projeto%20pessoal-8a8a8a?style=flat-square" alt="Status: projeto pessoal">
+
+[Funcionalidades](#-funcionalidades) · [Por que o nome?](#-por-que-o-nome) · [Como foi feito](#-como-foi-feito) · [Conceitos](#-conceitos-por-trás-da-técnica) · [Arquitetura](#-arquitetura-e-decisões-técnicas) · [Desempenho](#-desempenho) · [Instalar](#-instalar) · [Uso](#-uso) · [Configuração](#-configuração) · [Problemas](#-solução-de-problemas) · [Desenvolvimento](#-desenvolvimento) · [Uso responsável](#-uso-responsável)
+
 </div>
 
 ---
@@ -244,6 +252,9 @@ Por isso a porta fica em loopback e num perfil dedicado (detalhes na seção de 
 Cada subseção aponta o arquivo onde o assunto vive e explica o porquê da escolha. O princípio comum: uma falha de
 interpretação, de leitura ou de rede deve terminar em pausa e notificação, não em insistência.
 
+<details>
+<summary><b>Diagrama de sequência</b></summary>
+
 ```mermaid
 sequenceDiagram
     actor Op as Operador
@@ -275,6 +286,8 @@ sequenceDiagram
     end
     Lp-->>Op: notificação de pausa ou fim
 ```
+
+</details>
 
 ### 1. Conexão por CDP
 
@@ -497,6 +510,9 @@ continua sendo manual, com `quiz-doctor` e `--dry-run`.
 
 ### Decisões e alternativas
 
+<details>
+<summary><b>Tabela de decisões</b></summary>
+
 | Decisão | Alternativa descartada | Motivo |
 |---|---|---|
 | Conectar a um navegador aberto por CDP | Lançar um navegador próprio | Reaproveita a sessão autenticada e não mexe no mouse (`browser.py`) |
@@ -506,6 +522,8 @@ continua sendo manual, com `quiz-doctor` e `--dry-run`.
 | Uma chamada `claude -p` por questão, sem ferramentas | Sessão persistente do Claude Code com ferramentas | Sem estado entre questões e menor latência medida (4,5 s para 3,3 s) |
 | Dry-run pelo mesmo caminho das ações reais | Um modo de simulação separado | O teste cobre o código que roda de verdade |
 | Pausar diante do inesperado | Repetir a ação até dar certo | Evita cliques repetidos ou fora de lugar |
+
+</details>
 
 ---
 
