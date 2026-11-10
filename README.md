@@ -91,8 +91,7 @@ Cada tarefa seguiu o mesmo ciclo de cinco passos:
 5. **Aceitação.** O operador confere o relatório, roda a suíte, faz o merge e repete a execução real que originou a tarefa.
 
 O critério de aceitação de cada tarefa tem duas partes: a suíte offline passa (incluindo um teste novo que reproduz o
-defeito) e a situação real que o originou deixa de ocorrer. Sem as duas, a tarefa volta ao passo 2. Esse ciclo produziu,
-entre outras mudanças, a remoção do código legado de OCR (commit `131366c`) e as três correções abaixo.
+defeito) e a situação real que o originou deixa de ocorrer. Sem as duas, a tarefa volta ao passo 2.
 
 ### Defeitos encontrados em execução real
 
