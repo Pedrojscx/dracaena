@@ -1,7 +1,7 @@
 """Erros do Claude com subprocesso simulado; nenhuma chamada externa."""
 import unittest
 from unittest import mock
-from quizhelper import claude
+from dracaena.core import claude
 
 
 class ClaudeErrorsTest(unittest.TestCase):
