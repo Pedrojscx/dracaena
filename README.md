@@ -67,8 +67,9 @@ quem escreve o código não deve ser quem o revisa.
 
 | Papel | Quem | Responsabilidade |
 |---|---|---|
-| **Operador** | Pedro | Define o objetivo, executa a ferramenta num ambiente real, fornece logs e capturas e decide cada merge. |
-| **Analista e arquiteto** | Claude (conversa) | Inventaria o repositório, lê os registros de execução, formula e descarta hipóteses e redige a especificação de cada tarefa, com escopo e critérios de aceitação. |
+| **Operador** | Pedro | Define o objetivo, executa a ferramenta num ambiente real, formula e descarta hipóteses e redige a especificação de cada tarefa e decide cada merge. |
+| **Analista e arquiteto** | Claude (conversa) | Inventaria o repositório, lê os registros de execução, fornece logs e capturas.|
+| **Codificador** | Claude Code (CLI) | Codifica e analisa a aplicação com escopo e critérios de aceitação para cada tarefa.| 
 | **Motor de resposta** | Claude Code | Roda dentro do produto: cada consulta é uma chamada `claude -p` isolada (ver [Motor de resposta isolado](#4-motor-de-resposta-isolado)). |
 
 <!-- confirmar com o autor
