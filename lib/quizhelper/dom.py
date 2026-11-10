@@ -49,7 +49,9 @@ const QH = {
   // rolagem vertical da página não importa.
   onScreen(e) { if (!QH.visible(e)) return false; const r = e.getBoundingClientRect();
       return r.right > 0 && r.left < innerWidth; },
-  finalscreen(doc) { return QH.first(doc, e => e.tagName === 'FINALSCREEN-VIEW' && QH.onScreen(e)); },
+  finalscreen(doc) { return QH.first(doc, e => /(^|-)FINALSCREEN-VIEW$/.test(e.tagName) && QH.onScreen(e)); },
+  // A barra da avaliação tem duas variantes de tag: `assessment-` e `secure-` (exame final).
+  toolbar(doc) { return QH.first(doc, e => e.tagName === 'ASSESSMENT-TOOLBAR-VIEW' || e.tagName === 'SECURE-TOOLBAR-VIEW'); },
 };
 """
 
@@ -65,7 +67,7 @@ _LOCATE = js(r"""
   const doc = document;
   const out = {mode: null, final: false, start: false, counter: null, host: null, key: null, reason: ''};
   if (QH.finalscreen(doc)) { out.final = true; out.mode = 'assessment'; return out; }
-  const toolbar = QH.first(doc, e => e.tagName === 'ASSESSMENT-TOOLBAR-VIEW');
+  const toolbar = QH.toolbar(doc);
   if (toolbar) {
     out.mode = 'assessment';
     const label = QH.first(toolbar.shadowRoot || toolbar, e => e.classList && e.classList.contains('question-label'));
@@ -238,7 +240,7 @@ _FIGURES = js(r"""
   (function scan(n) {
     if (n.nodeType !== 1) return;
     const t = n.tagName.toLowerCase();
-    if (['material-icon', 'button', 'assessment-toolbar-view', 'script', 'style', 'video'].includes(t)) return;
+    if (['material-icon', 'button', 'assessment-toolbar-view', 'secure-toolbar-view', 'script', 'style', 'video'].includes(t)) return;
     const own = inside(n, host);
     if (t === 'img' || t === 'picture' || t === 'canvas' || (t === 'svg' && !own)) {
       const r = n.getBoundingClientRect(); const cs = getComputedStyle(n);
@@ -291,7 +293,7 @@ _ELEMENT = js(r"""
   if (kind === 'component-action')  // Submit/Reset do próprio componente (seção do curso)
     return QH.first(q, e => e.tagName === 'BUTTON' && e.classList.contains('js-btn-action'));
   if (kind === 'toolbar-submit') {
-    const tb = QH.first(document, e => e.tagName === 'ASSESSMENT-TOOLBAR-VIEW');
+    const tb = QH.toolbar(document);
     return tb ? QH.first(tb.shadowRoot || tb, e => e.tagName === 'BUTTON' && e.classList.contains('submit-button')) : null;
   }
   return null;
@@ -303,6 +305,30 @@ def element(frame, host, kind: str, index: int | None = None, letter: str | None
     h = frame.evaluate_handle(_ELEMENT, {"host": host, "kind": kind, "index": index, "letter": letter,
                                          "option": option})
     return h.as_element()
+
+
+_SUBMIT_INFO = js(r"""
+  const {host, kind} = arg; const q = QH.q(host);
+  let cands;
+  if (kind === 'toolbar-submit') {
+    const tb = QH.toolbar(document);
+    cands = tb ? QH.all(tb.shadowRoot || tb, e => e.tagName === 'BUTTON' && e.classList.contains('submit-button')) : [];
+  } else cands = QH.all(q, e => e.tagName === 'BUTTON' && e.classList.contains('js-btn-action'));
+  const off = (b) => b.disabled || b.classList.contains('is-disabled') || b.getAttribute('aria-disabled') === 'true';
+  return {candidates: cands.length, disabled: cands.filter(off).length};
+""")
+
+SUBMIT_SELECTORS = {"toolbar-submit": "(assessment|secure)-toolbar-view >> button.submit-button",
+                    "component-action": "questão >> button.js-btn-action"}
+
+
+def submit_info(frame, host, kind: str) -> dict:
+    """Diagnóstico do Submit: seletor usado, nº de candidatos e quantos estão desabilitados."""
+    try:
+        info = frame.evaluate(_SUBMIT_INFO, {"host": host, "kind": kind})
+    except Exception as exc:  # noqa: BLE001 - diagnóstico nunca pode mascarar a pausa
+        info = {"candidates": -1, "disabled": -1, "error": str(exc)[:80]}
+    return {"selector": SUBMIT_SELECTORS.get(kind, kind), **info}
 
 
 # ------------------------------------------------------------------ estado após o Submit

@@ -206,6 +206,9 @@ def main(argv: list[str]) -> int:
     files = {
         "assessment.html": assessment(),
         "assessment_final.html": assessment(final_visible=True),
+        # Exame final do curso: mesma avaliação, tags `secure-*` na barra e na faixa.
+        "assessment_secure.html": assessment().replace("assessment-toolbar-view", "secure-toolbar-view").replace(
+            "assessment-block-strip-view", "secure-block-strip-view"),
         "cyu_single.html": section("9.9.1.1 Check Your Understanding - Single", mcq(
             "s1", "Question 1", "Synthetic example: select the label Beta.", ["Alpha", "Beta", "Gamma", "Delta"], False,
             [3, 0, 1, 2], buttons=True), other=shadow("block-view", '<div class="block">' + mcq(

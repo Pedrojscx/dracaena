@@ -20,7 +20,7 @@ Ordem das verificações, a cada ação:
       `button.js-btn-action` com texto exatamente "Submit" (aria-label
       "Submit Your answer will be submitted"/"submit") ou um rótulo de
       RESET_WORDS ("Reset", "Try again", "Retry");
-   b) `button.submit-button` dentro de `assessment-toolbar-view`, texto
+   b) `button.submit-button` dentro de `assessment-toolbar-view` ou `secure-toolbar-view`, texto
       exatamente "Submit", aria-label "submit";
    c) seta de avançar da navegação de questões: NENHUM elemento se qualifica
       (Fase 0: as setas da página são "Scroll Question strip" e "Go To ...",
@@ -68,7 +68,7 @@ _CHECK = js(r"""
   const cls = (c) => el.classList.contains(c);
   // 1. tela de envio da avaliação
   if (QH.finalscreen(document)) return no('tela de envio da avaliação visível');
-  if (tags.includes('FINALSCREEN-VIEW')) return no('dentro de finalscreen-view');
+  if (tags.some(t => /(^|-)FINALSCREEN-VIEW$/.test(t))) return no('dentro de finalscreen-view');
   // 2. bloqueios explícitos
   if (cls('adaptive-assessment-submit')) return no('botão de envio da avaliação');
   if (el.id === 'confirm-exam' || el.id === 'confirm-label') return no('confirmação de envio');
@@ -97,7 +97,7 @@ _CHECK = js(r"""
     }
     return no('elemento do componente fora da lista de permissão');
   }
-  if (el.tagName === 'BUTTON' && cls('submit-button') && tags.includes('ASSESSMENT-TOOLBAR-VIEW')) {
+  if (el.tagName === 'BUTTON' && cls('submit-button') && (tags.includes('ASSESSMENT-TOOLBAR-VIEW') || tags.includes('SECURE-TOOLBAR-VIEW'))) {
     if (lo(QH.text(el)) === 'submit' && aria === 'submit') return {ok: true, kind: 'submit', desc: desc(el)};
     return no('submit da barra com rótulo inesperado');
   }

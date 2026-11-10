@@ -101,13 +101,32 @@ class Actor:
         return done
 
     def submit(self, host, mode: str) -> str:
+        """Localiza o Submit com espera ativa (SUBMIT_TIMEOUT_MS), reconsultando o DOM a
+        cada ciclo, e espera ele habilitar. O Submit nasce desabilitado até haver
+        alternativa marcada e a barra pode ser re-renderizada ao trocar de questão."""
         kind = "toolbar-submit" if mode == "assessment" else "component-action"
-        el = dom.element(self.frame, host, kind)
-        if el is None:
-            raise Pause("botão Submit não encontrado")
-        wait_for(lambda: not el.evaluate("b => b.disabled || b.classList.contains('is-disabled')"), self.verify_s,
-                 self.abort)
-        self.guard.click(el, host, "Submit")
+        timeout_s = int(self.cfg.get("SUBMIT_TIMEOUT_MS", 5000)) / 1000
+        off_js = "b => b.disabled || b.classList.contains('is-disabled') || b.getAttribute('aria-disabled') === 'true'"
+        state: dict = {"el": None, "disabled": True}
+
+        def ready():
+            try:
+                el = dom.element(self.frame, host, kind)
+                state["el"] = el
+                state["disabled"] = el is not None and bool(el.evaluate(off_js))
+            except Exception:  # noqa: BLE001 - nó trocado no meio da consulta: tenta no próximo ciclo
+                state["el"], state["disabled"] = None, True
+            return state["el"] is not None and not state["disabled"]
+
+        if not wait_for(ready, timeout_s, self.abort):
+            info = dom.submit_info(self.frame, host, kind)
+            self.guard.log(f"Submit: seletor={info['selector']!r} candidatos={info['candidates']} "
+                           f"desabilitados={info['disabled']} existia={state['el'] is not None} "
+                           f"timeout={timeout_s:g}s")
+            if state["el"] is None:
+                raise Pause("botão Submit não encontrado")
+            raise Pause("botão Submit continua desabilitado")
+        self.guard.click(state["el"], host, "Submit")
         return "Submit"
 
     def reset(self, host) -> bool:
