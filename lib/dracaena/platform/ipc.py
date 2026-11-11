@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import socket
 import stat
+import struct
 import threading
 from .paths import private_dir, runtime_dir
 
@@ -72,6 +73,26 @@ def _verify_server(handle):
             token.Close()
     finally:
         process.Close()
+
+
+def _verify_socket_owner(path):
+    """Unix: só conecta a um socket (não link) pertencente ao usuário atual."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return  # o connect() informará que o daemon não está em execução
+    if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid():
+        raise PermissionError("O endpoint IPC não pertence ao usuário atual; conexão recusada")
+
+
+def _verify_peer(sock):
+    """Linux: confirma o UID do processo servidor via SO_PEERCRED, antes de enviar dados."""
+    option = getattr(socket, "SO_PEERCRED", None)
+    if option is None:
+        return
+    _, uid, _ = struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, option, struct.calcsize("3i")))
+    if uid != os.getuid():
+        raise PermissionError("O servidor IPC pertence a outro usuário; conexão recusada")
 
 
 def endpoint():
@@ -231,10 +252,12 @@ def connect(timeout=5):
             handle.Close()
             raise
         return Connection(handle, True)
+    _verify_socket_owner(endpoint())
     sock = socket.socket(socket.AF_UNIX)
     sock.settimeout(timeout)
     try:
         sock.connect(endpoint())
+        _verify_peer(sock)
     except BaseException:
         sock.close()
         raise

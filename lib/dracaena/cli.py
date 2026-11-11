@@ -1,6 +1,7 @@
 """Linha de comando do Dracaena."""
 import argparse
 import json
+import signal
 from .platform.ipc import request
 
 ALIASES = {"loop": "toggle", "probe": "probe.start"}
@@ -29,6 +30,8 @@ def main(argv=None):
         from .daemon import Daemon, Simulator
         if not args.simulate:
             parser.error("a integração com o núcleo ainda não está disponível; use --simulate")
+        if hasattr(signal, "SIGTERM"):  # encerra limpo (remove o socket) em vez de morrer abruptamente
+            signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
         try:
             Daemon(Simulator(), simulate=True).run()
         except KeyboardInterrupt:

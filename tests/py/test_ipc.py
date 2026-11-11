@@ -302,3 +302,325 @@ class WindowsPipeTests(unittest.TestCase):
         self.win32file.WriteFile = MagicMock(side_effect=self.WinError(232, "WriteFile", "fechando"))
         with self.assertRaises(OSError):
             conn.send({"ok": True})
+
+
+def ask(daemon, cmd, args=None, conn=None):
+    return daemon.dispatch({"id": 1, "cmd": cmd, "args": args or {}}, conn)
+
+
+class CaptureConn(FakeConn):
+    pass
+
+
+def subscribed(daemon, events):
+    conn = CaptureConn()
+    assert ask(daemon, "subscribe", {"events": events}, conn)["ok"]
+    daemon.clients[conn].release(None, 0)
+    return conn
+
+
+class SitesSaveTests(unittest.TestCase):
+    TOML = '[site]\nname = "Exemplo"\nversion = 1\n'
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        self.directory = tempfile.TemporaryDirectory()
+        self.config = Path(self.directory.name) / "cfg"
+        self.patch = patch("dracaena.platform.sites.config_dir", return_value=self.config)
+        self.patch.start()
+
+    def tearDown(self):
+        self.patch.stop()
+        self.directory.cleanup()
+
+    def test_simulated_returns_path_without_writing(self):
+        response = ask(Daemon(Simulator(), simulate=True), "sites.save", {"name": "meu-site_1", "toml": self.TOML})
+        self.assertTrue(response["ok"])
+        self.assertEqual(set(response["data"]), {"path"})
+        self.assertTrue(response["data"]["path"].endswith("meu-site_1.toml"))
+        self.assertFalse(self.config.exists())
+
+    def test_name_and_size_validation(self):
+        daemon = Daemon(Simulator(), simulate=True)
+        for name in ("", "A", "a b", "../x", "a.toml", "x" * 65, None, 3):
+            response = ask(daemon, "sites.save", {"name": name, "toml": self.TOML})
+            self.assertEqual((response["ok"], response["code"]), (False, "bad_request"), name)
+        self.assertTrue(ask(daemon, "sites.save", {"name": "x" * 64, "toml": self.TOML})["ok"])
+        edge = "# " + "a" * (64 * 1024 - 3) + "\n"
+        self.assertEqual(len(edge.encode()), 64 * 1024)
+        self.assertTrue(ask(daemon, "sites.save", {"name": "ok", "toml": edge})["ok"])
+        response = ask(daemon, "sites.save", {"name": "ok", "toml": edge + "#"})
+        self.assertEqual(response["code"], "bad_request")
+        self.assertIn("64 KiB", response["error"])
+        for toml in (5, "[quebrado"):
+            self.assertEqual(ask(daemon, "sites.save", {"name": "ok", "toml": toml})["code"], "bad_request")
+        self.assertEqual(ask(daemon, "sites.save", {"name": "ok", "toml": self.TOML, "overwrite": "sim"})["code"], "bad_request")
+
+    def test_real_write_overwrite_and_permissions(self):
+        import os
+        daemon = Daemon(Simulator(), simulate=False)
+        first = ask(daemon, "sites.save", {"name": "demo", "toml": self.TOML})
+        self.assertTrue(first["ok"])
+        path = self.config / "sites" / "demo.toml"
+        self.assertEqual(first["data"]["path"], str(path))
+        self.assertEqual(path.read_text(encoding="utf-8"), self.TOML)
+        if os.name != "nt":
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        again = ask(daemon, "sites.save", {"name": "demo", "toml": self.TOML.replace("1", "2")})
+        self.assertEqual((again["ok"], again["code"]), (False, "bad_state"))
+        self.assertIn("1", path.read_text())
+        replaced = ask(daemon, "sites.save", {"name": "demo", "toml": self.TOML.replace("1", "2"), "overwrite": True})
+        self.assertTrue(replaced["ok"])
+        self.assertIn("2", path.read_text())
+        self.assertEqual([p.name for p in path.parent.iterdir()], ["demo.toml"])
+        self.assertEqual(ask(daemon, "sites.list")["data"], [{"name": "Exemplo", "version": 2}])
+
+
+class ProbeTests(unittest.TestCase):
+    def test_success_result_and_events_only_for_subscribers(self):
+        import tomllib
+        daemon = Daemon(Simulator(), simulate=True, probe_step=0)
+        watcher, other = subscribed(daemon, ["probe"]), subscribed(daemon, ["state"])
+        response = ask(daemon, "probe.start", {"url": "https://exemplo.test/pratica"})
+        self.assertTrue(response["ok"])
+        data = response["data"]
+        self.assertEqual(set(data), {"matches", "questions", "draft_toml"})
+        self.assertTrue(all(isinstance(n, int) for n in data["matches"].values()))
+        self.assertEqual(data["questions"], 1)
+        tomllib.loads(data["draft_toml"])
+        self.assertEqual([(e["phase"], e["done"], e["total"]) for e in watcher.sent],
+                         [("connect", 0, 4), ("scan", 1, 4), ("match", 2, 4), ("draft", 3, 4), ("done", 4, 4)])
+        self.assertTrue(all(e["event"] == "probe" for e in watcher.sent))
+        self.assertEqual(other.sent, [])
+
+    def test_simulated_errors_carry_code_and_portuguese_message(self):
+        for code in ("no_browser", "no_site", "bad_request", "internal"):
+            daemon = Daemon(Simulator(), simulate=True, probe_step=0)
+            watcher = subscribed(daemon, ["probe"])
+            response = ask(daemon, "probe.start", {"simulate_error": code})
+            self.assertEqual((response["ok"], response["code"]), (False, code))
+            self.assertRegex(response["error"], "[ãáçéíõ ]")
+            self.assertEqual(watcher.sent[-1]["phase"], "error")
+            self.assertLess(watcher.sent[-1]["done"], 4)
+            self.assertEqual(ask(daemon, "probe.cancel")["data"], {"cancelled": False})
+
+    def test_simulated_cancellation_and_busy_state(self):
+        daemon = Daemon(Simulator(), simulate=True, probe_step=0)
+        watcher = subscribed(daemon, ["probe"])
+        response = ask(daemon, "probe.start", {"simulate_error": "cancelled"})
+        self.assertEqual((response["ok"], response["code"]), (False, "cancelled"))
+        self.assertEqual(watcher.sent[-1]["phase"], "cancelled")
+
+    def test_real_cancel_stops_a_running_probe(self):
+        daemon = Daemon(Simulator(), simulate=True, probe_step=10)
+        watcher = subscribed(daemon, ["probe"])
+        results = []
+        thread = threading.Thread(target=lambda: results.append(ask(daemon, "probe.start")))
+        thread.start()
+        for _ in range(200):
+            if watcher.sent:
+                break
+            threading.Event().wait(.01)
+        busy = ask(daemon, "probe.start")
+        self.assertEqual((busy["ok"], busy["code"]), (False, "bad_request"))
+        self.assertEqual(ask(daemon, "probe.cancel")["data"], {"cancelled": True})
+        thread.join(3)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(results[0]["code"], "cancelled")
+        self.assertEqual(watcher.sent[-1]["phase"], "cancelled")
+        self.assertEqual(ask(daemon, "probe.cancel")["data"], {"cancelled": False})
+
+    def test_invalid_arguments_start_nothing(self):
+        daemon = Daemon(Simulator(), simulate=True, probe_step=0)
+        watcher = subscribed(daemon, ["probe"])
+        for args in ({"url": 5}, {"url": "ftp://x"}, {"url": "https://x/" + "a" * 3000}, {"simulate_error": "xyz"}):
+            self.assertEqual(ask(daemon, "probe.start", args)["code"], "bad_request")
+        self.assertEqual(watcher.sent, [])
+
+    def test_probe_does_not_block_other_commands(self):
+        daemon = Daemon(Simulator(), simulate=True, probe_step=10)
+        thread = threading.Thread(target=lambda: ask(daemon, "probe.start"))
+        thread.start()
+        try:
+            self.assertEqual(ask(daemon, "status")["data"]["state"], "idle")
+        finally:
+            ask(daemon, "probe.cancel")
+            thread.join(3)
+
+    def test_probe_is_a_valid_subscription_and_real_mode_is_unavailable(self):
+        self.assertTrue(ask(Daemon(Simulator()), "subscribe", {"events": ["probe", "shortcut_test"]}, FakeConn())["ok"])
+        response = ask(Daemon(Simulator(), simulate=False), "probe.start")
+        self.assertEqual(response["code"], "no_site")
+
+
+class ConfigSchemaTests(unittest.TestCase):
+    def test_schema_covers_every_editable_key_in_portuguese(self):
+        from dracaena.platform import config
+        schema = ask(Daemon(Simulator(), simulate=True), "config.schema")["data"]
+        self.assertEqual([e["key"] for e in schema], list(config.DEFAULTS))
+        for entry in schema:
+            self.assertIn(entry["type"], ("integer", "string"))
+            self.assertEqual(entry["default"], config.DEFAULTS[entry["key"]])
+            self.assertGreater(len(entry["label"]), 2)
+            self.assertGreater(len(entry["description"]), 20)
+            self.assertNotEqual(entry["label"], entry["key"])
+            self.assertRegex(entry["description"], r"[ãáâçéêíóõú]|(?i:\b(de|do|da|para|em|um|uma|usa|se)\b)")
+            if entry["type"] == "integer":
+                self.assertLessEqual(entry["min"], entry["default"])
+                self.assertGreaterEqual(entry["max"], entry["default"])
+        by_key = {e["key"]: e for e in schema}
+        self.assertEqual(by_key["BROWSER_FALLBACK"]["choices"], ["", "playwright"])
+        self.assertEqual((by_key["MAX_QUESTIONS"]["min"], by_key["MAX_QUESTIONS"]["max"]), (1, 1000))
+
+    def test_schema_limits_are_the_enforced_limits(self):
+        from dracaena.platform import config
+        for entry in config.schema():
+            if "min" in entry:
+                config.validate(entry["key"], entry["min"])
+                config.validate(entry["key"], entry["max"])
+                with self.assertRaises(ValueError):
+                    config.validate(entry["key"], entry["min"] - 1)
+                with self.assertRaises(ValueError):
+                    config.validate(entry["key"], entry["max"] + 1)
+
+
+class ToggleCommandTests(unittest.TestCase):
+    def test_three_modes(self):
+        from dracaena.platform.launcher import toggle_command
+        self.assertEqual(toggle_command({"APPIMAGE": "/opt/Dracaena.AppImage"}, frozen=True, executable="/tmp/.mount/dracaena"),
+                         ["/opt/Dracaena.AppImage", "toggle"])
+        self.assertEqual(toggle_command({}, frozen=True, executable="C:/App/dracaena.exe"), ["C:/App/dracaena.exe", "toggle"])
+        self.assertEqual(toggle_command({}, frozen=False, executable="/usr/bin/python3"),
+                         ["/usr/bin/python3", "-m", "dracaena.cli", "toggle"])
+        self.assertEqual(toggle_command({"APPIMAGE": ""}, frozen=False, executable="py"), ["py", "-m", "dracaena.cli", "toggle"])
+        self.assertEqual(toggle_command({"APPIMAGE": "relativo"}, frozen=False, executable="py")[1:2], ["-m"])
+
+    def test_defaults_follow_the_running_interpreter(self):
+        import sys
+        from dracaena.platform.launcher import toggle_command
+        command = toggle_command({})
+        self.assertEqual(command[0], sys.executable)
+        self.assertEqual(command[-1], "toggle")
+
+    def test_hello_exposes_toggle_cmd(self):
+        from unittest.mock import patch
+        with patch("dracaena.platform.launcher.sys.frozen", True, create=True):
+            data = ask(Daemon(Simulator(), simulate=True), "hello")["data"]
+        self.assertEqual(data["toggle_cmd"][-1], "toggle")
+        for cmd in ("sites.save", "probe.cancel", "shortcut.test"):
+            self.assertIn(cmd, data["caps"])
+
+
+class ShortcutTestTests(unittest.TestCase):
+    def setUp(self):
+        self.now = 1000.0
+        self.service = Simulator()
+        self.daemon = Daemon(self.service, simulate=True, clock=lambda: self.now)
+        self.watcher = subscribed(self.daemon, ["shortcut_test", "state"])
+        self.calls = []
+        original = self.service.handle
+        self.service.handle = lambda cmd, args: self.calls.append(cmd) or original(cmd, args)
+
+    def test_armed_toggle_is_consumed_without_touching_the_service(self):
+        self.assertEqual(ask(self.daemon, "shortcut.test", {"arm": True})["data"], {"armed": True})
+        response = ask(self.daemon, "toggle")
+        self.assertTrue(response["ok"])
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.service.state, "idle")
+        self.assertEqual(self.watcher.sent, [{"event": "shortcut_test", "ok": True}])
+        ask(self.daemon, "toggle")  # desarmado: comportamento normal
+        self.assertEqual(self.calls, ["toggle"])
+        self.assertEqual(self.service.state, "running")
+        self.assertEqual(sum(e["event"] == "shortcut_test" for e in self.watcher.sent), 1)
+
+    def test_disarms_itself_after_30_seconds(self):
+        ask(self.daemon, "shortcut.test", {"arm": True})
+        self.now += 29.9
+        # ainda válido ao rearmar: renova o prazo
+        ask(self.daemon, "shortcut.test", {"arm": True})
+        self.now += 29.9
+        self.assertTrue(self.daemon.armed_until is not None)
+        self.now += 0.2
+        ask(self.daemon, "toggle")
+        self.assertEqual(self.calls, ["toggle"])
+        self.assertFalse(any(e["event"] == "shortcut_test" for e in self.watcher.sent))
+        self.assertIsNone(self.daemon.armed_until)
+
+    def test_disarm_command_and_validation(self):
+        ask(self.daemon, "shortcut.test", {"arm": True})
+        self.assertEqual(ask(self.daemon, "shortcut.test", {"arm": False})["data"], {"armed": False})
+        ask(self.daemon, "toggle")
+        self.assertEqual(self.calls, ["toggle"])
+        for arm in ("true", 1, None):
+            self.assertEqual(ask(self.daemon, "shortcut.test", {"arm": arm})["code"], "bad_request")
+
+    def test_other_commands_do_not_consume_the_test(self):
+        ask(self.daemon, "shortcut.test", {"arm": True})
+        ask(self.daemon, "status")
+        self.assertIsNotNone(self.daemon.armed_until)
+
+
+class DoctorFormatTests(unittest.TestCase):
+    def test_definitive_format_in_portuguese(self):
+        from unittest.mock import patch
+        from dracaena.platform import browser
+        with patch.object(browser, "resolve", side_effect=browser.BrowserError("Nenhum navegador Chromium configurado ou detectado")), \
+                patch("shutil.which", return_value=None):
+            result = ask(Daemon(Simulator(), simulate=True), "doctor")["data"]
+        self.assertEqual(set(result), {"ok", "checks"})
+        self.assertFalse(result["ok"])
+        for check in result["checks"]:
+            self.assertLessEqual(set(check), {"name", "ok", "message", "hint"})
+            self.assertIsInstance(check["ok"], bool)
+            self.assertTrue(check["message"])
+            if not check["ok"]:
+                self.assertTrue(check["hint"])
+        names = {c["name"]: c for c in result["checks"]}
+        self.assertFalse(names["claude"]["ok"])
+        self.assertIn("não encontrado", names["claude"]["message"])
+        self.assertFalse(names["browser"]["ok"])
+        self.assertTrue(names["config"]["ok"])
+
+
+class UnixPeerOwnerTests(unittest.TestCase):
+    def test_client_refuses_foreign_owner_before_sending(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from dracaena.platform import ipc
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / "r"
+            with patch("dracaena.platform.ipc.runtime_dir", return_value=base):
+                listener = ipc.Listener()
+                received = []
+                def serve_once():
+                    peer = listener.accept()
+                    received.append(peer.receive())
+                    peer.close()
+                thread = threading.Thread(target=serve_once, daemon=True)
+                thread.start()
+                try:
+                    with patch.object(os, "getuid", return_value=os.getuid() + 1):
+                        with self.assertRaisesRegex(PermissionError, "não pertence|outro usuário"):
+                            ipc.request("status")
+                    self.assertEqual(received, [])
+                    conn = ipc.connect(timeout=2)  # dono correto: aceito
+                    conn.close()
+                finally:
+                    listener.close()
+                    thread.join(2)
+
+    def test_non_socket_endpoint_is_refused(self):
+        import tempfile
+        from pathlib import Path
+        from dracaena.platform import ipc
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ctl.sock"
+            path.write_text("x")
+            with self.assertRaises(PermissionError):
+                ipc._verify_socket_owner(str(path))
+            path.unlink()
+            ipc._verify_socket_owner(str(path))  # ausente: deixa o connect() reportar

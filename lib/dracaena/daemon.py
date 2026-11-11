@@ -2,17 +2,25 @@
 import logging
 import threading
 import time
+from urllib.parse import urlsplit
 from .platform.ipc import Listener
 from .platform.instance import InstanceLock
 
 COMMANDS = ("hello", "subscribe", "status", "toggle", "stop", "ask", "once", "config.get",
-            "config.set", "config.schema", "sites.list", "probe.start", "doctor")
+            "config.set", "config.schema", "sites.list", "sites.save", "probe.start", "probe.cancel",
+            "doctor", "shortcut.test")
+SHORTCUT_TEST_SECONDS = 30
 
 
-class ServiceUnavailable(Exception):
+class ProbeError(Exception):
+    """Falha de probe com código IPC (no_browser|no_site|bad_request|cancelled|internal)."""
+
     def __init__(self, code, message):
         super().__init__(message)
         self.code = code
+
+
+ServiceUnavailable = ProbeError  # nome antigo, mantido por compatibilidade
 
 
 class Simulator:
@@ -53,8 +61,94 @@ class Simulator:
         return self.snapshot()
 
 
-EVENTS = ("state", "log", "question", "verdict")
+EVENTS = ("state", "log", "question", "verdict", "probe", "shortcut_test")
 LOG = logging.getLogger("dracaena")
+
+
+DRAFT_TOML = """# Rascunho gerado pela sondagem simulada.
+[site]
+name = "Prática simulada"
+version = 0
+
+[selectors]
+question = "[data-question]"
+option = "[data-option]"
+"""
+
+
+class ProbeRunner:
+    """Sondagem somente leitura (simulada): emite progresso e permite cancelar.
+
+    Fases: connect, scan, match, draft e, ao fim, done. `done` conta as etapas já
+    concluídas quando a fase começa; em erro/cancelamento a fase final é error/cancelled.
+    """
+
+    PHASES = ("connect", "scan", "match", "draft")
+    FAILURES = {
+        "no_browser": ("connect", "Nenhum navegador com a prática aberta foi encontrado."),
+        "no_site": ("scan", "Nenhum site compatível foi reconhecido nesta página."),
+        "bad_request": ("connect", "O pedido de sondagem é inválido."),
+        "internal": ("match", "Falha interna durante a sondagem."),
+    }
+
+    def __init__(self, emit, step=0.2):
+        self.emit, self.step = emit, step
+        self.lock = threading.Lock()
+        self.cancel_event = None  # definido enquanto uma sondagem está ativa
+
+    @staticmethod
+    def validate(args):
+        url, failure = args.get("url"), args.get("simulate_error")
+        if url is not None:
+            parsed = urlsplit(url) if isinstance(url, str) and len(url) <= 2048 else None
+            if not parsed or parsed.scheme not in ("http", "https") or not parsed.netloc:
+                raise ValueError("URL inválida: use um endereço http ou https de até 2048 caracteres")
+        if failure is not None and failure not in (*ProbeRunner.FAILURES, "cancelled"):
+            raise ValueError("simulate_error inválido: use no_browser, no_site, bad_request, internal ou cancelled")
+        return failure
+
+    def _event(self, phase, done):
+        self.emit({"event": "probe", "phase": phase, "done": done, "total": len(self.PHASES)})
+
+    def start(self, args):
+        failure = self.validate(args)
+        with self.lock:
+            if self.cancel_event is not None:
+                raise ProbeError("bad_request", "Já existe uma sondagem em andamento")
+            cancel = self.cancel_event = threading.Event()
+        completed = 0
+        try:
+            for index, phase in enumerate(self.PHASES):
+                completed = index
+                self._event(phase, completed)
+                if failure == "cancelled" and phase == "scan":
+                    cancel.set()
+                if cancel.wait(self.step):
+                    break
+                if failure in self.FAILURES and self.FAILURES[failure][0] == phase:
+                    self._event("error", completed)
+                    raise ProbeError(failure, self.FAILURES[failure][1])
+            else:
+                with self.lock:  # decide sob o lock: cancel() só vale enquanto ativa
+                    if not cancel.is_set():
+                        self.cancel_event = None
+                        completed = len(self.PHASES)
+                if completed == len(self.PHASES):
+                    self._event("done", completed)
+                    return {"matches": {"[data-question]": 1, "[data-option]": 4}, "questions": 1,
+                            "draft_toml": DRAFT_TOML}
+            self._event("cancelled", completed)
+            raise ProbeError("cancelled", "Sondagem cancelada")
+        finally:
+            with self.lock:
+                self.cancel_event = None
+
+    def cancel(self):
+        with self.lock:
+            if self.cancel_event is None or self.cancel_event.is_set():
+                return False
+            self.cancel_event.set()
+            return True
 
 
 class Subscription:
@@ -98,9 +192,13 @@ class Subscription:
 
 
 class Daemon:
-    def __init__(self, service, simulate=False):
+    def __init__(self, service, simulate=False, clock=time.monotonic, probe_step=0.2):
         self.simulate = simulate
         self.service = service
+        self.clock = clock
+        self.armed_until = None
+        self.shortcut_lock = threading.Lock()
+        self.probe = ProbeRunner(self.emit, probe_step)
         self.clients = {}
         self.lock = threading.RLock()
         self.client_lock = threading.RLock()
@@ -132,18 +230,12 @@ class Daemon:
         if cmd == "sites.list":
             if self.simulate:
                 return [{"name": "Prática simulada", "version": 0, "simulated": True}]
-            import tomllib
-            from .platform.paths import config_dir
-            sites = []
-            for path in sorted((config_dir() / "sites").glob("*.toml")):
-                with path.open("rb") as stream:
-                    site = tomllib.load(stream).get("site", {})
-                sites.append({"name": site.get("name", path.stem), "version": site.get("version", 0)})
-            return sites
-        if cmd == "probe.start":
-            if self.simulate:
-                return {"simulated": True, "matches": 1, "questions": 1}
-            raise ServiceUnavailable("no_site", "O probe aguarda a integração com o adaptador")
+            from .platform.sites import list_sites
+            return list_sites()
+        if cmd == "sites.save":
+            from .platform.sites import save
+            # Simulado: valida e responde o caminho, sem gravar nada.
+            return save(args.get("name"), args.get("toml"), args.get("overwrite", False), write=not self.simulate)
         raise ValueError("Comando de plataforma desconhecido")
 
     def dispatch(self, request, conn):
@@ -157,7 +249,8 @@ class Daemon:
             return dict(id=ident, ok=False, error="Comando desconhecido", code="unknown_cmd")
         try:
             if cmd == "hello":
-                data = {"v": 0, "app_version": "0.1.0", "caps": list(COMMANDS)}
+                from .platform.launcher import toggle_command
+                data = {"v": 0, "app_version": "0.1.0", "caps": list(COMMANDS), "toggle_cmd": toggle_command()}
             elif cmd == "subscribe":
                 events = args.get("events", ["state"])
                 if not isinstance(events, list) or any(e not in EVENTS for e in events):
@@ -165,6 +258,15 @@ class Daemon:
                 with self.client_lock:
                     self.clients[conn] = Subscription(conn, events)
                 data = {"events": events}
+            elif cmd == "probe.start":
+                data = self.start_probe(args)
+            elif cmd == "probe.cancel":
+                data = {"cancelled": self.probe.cancel()}
+            elif cmd == "shortcut.test":
+                data = self.shortcut_test(args)
+            elif cmd == "toggle" and self.consume_shortcut_test():
+                self.emit({"event": "shortcut_test", "ok": True})
+                data = {"shortcut_test": True}
             else:
                 with self.lock:
                     if cmd in ("status", "toggle", "stop", "ask", "once"):
@@ -174,13 +276,34 @@ class Daemon:
             return dict(id=ident, ok=True, data=data)
         except ValueError as exc:
             return dict(id=ident, ok=False, error=str(exc), code="bad_request")
+        except ProbeError as exc:
+            return dict(id=ident, ok=False, error=str(exc), code=exc.code)
         except Exception as exc:
             code = getattr(exc, "code", "internal")
-            allowed = ("bad_request", "unknown_cmd", "bad_state", "no_browser", "no_site", "refused")
+            allowed = ("bad_request", "unknown_cmd", "bad_state", "no_browser", "no_site", "refused", "cancelled")
             if code not in allowed:
                 LOG.exception("Falha interna ao executar %s", cmd)
             return dict(id=ident, ok=False, error=str(exc) if code in allowed else "Falha ao executar comando",
                         code=code if code in allowed else "internal")
+
+    def start_probe(self, args):
+        if not self.simulate:
+            raise ProbeError("no_site", "A sondagem aguarda a integração com o adaptador")
+        return self.probe.start(args)
+
+    def shortcut_test(self, args):
+        arm = args.get("arm")
+        if not isinstance(arm, bool):
+            raise ValueError("'arm' deve ser verdadeiro ou falso")
+        with self.shortcut_lock:
+            self.armed_until = self.clock() + SHORTCUT_TEST_SECONDS if arm else None
+        return {"armed": arm}
+
+    def consume_shortcut_test(self):
+        """True se o teste de atalho estava armado e válido; desarma em qualquer caso."""
+        with self.shortcut_lock:
+            until, self.armed_until = self.armed_until, None
+        return until is not None and self.clock() < until
 
     def initial_state(self, subscription):
         """Libera o assinante com o estado atual, obtido pela API pública do serviço."""
