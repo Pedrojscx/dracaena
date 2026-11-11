@@ -1,173 +1,272 @@
-"""Guarda validada exclusivamente com fixtures sintéticas locais."""
+"""Guarda validada exclusivamente com páginas sintéticas locais."""
 
 from __future__ import annotations
 
 import re
 import unittest
-from pathlib import Path
 
-from web import REPO, BrowserFixtureCase
+from fx import REPO, BrowserCase
 
-from quizhelper import dom
-from quizhelper.guard import FinalScreen, Guard, Refused
-
-CFG = {"SUBMIT_WORDS_BLOCKLIST": ["all", "assessment", "exam", "finish", "end"],
-       "RESET_WORDS": ["Reset", "Try again", "Retry"], "ACTION_TIMEOUT_MS": 2000}
-
-FINAL_PAGES = ["assessment_final.html"]
-
-FS_JS = dom.js(r"""const fs = QH.first(document, e => e.tagName === 'FINALSCREEN-VIEW'); return fs ? fs.shadowRoot : null;""")
+from dracaena.core.model import Target
+from dracaena.guard import BLOCK_WORDS, Guard, Refused, ResultScreen
 
 
-class GuardTests(BrowserFixtureCase):
+class GuardCase(BrowserCase):
     def setUp(self):
         self.page = self.browser.new_page()
         self.log: list[str] = []
-        self.guard = Guard(self.page.main_frame, CFG, self.log.append)
+        self.guard = Guard(self.log.append)
 
     def tearDown(self):
         self.page.close()
 
-    def open(self, name: str):
+    def open(self, name: str, qid: str = "r1", guard: Guard | None = None):
         self.page.goto(self.server.url(name))
         self.page.wait_for_function("() => window.__SIM_CLICKS !== undefined")
+        self.guard = guard or self.guard
+        self.host = self.page.query_selector(f"#{qid}")
+        self.guard.bind(self.page.main_frame, self.host, qid)
+        return self.host
+
+    def el(self, selector: str):
+        return self.page.query_selector(selector)
+
+    def t(self, role: str, selector: str, action: str = "click", qid: str | None = None, value=None) -> Target:
+        return Target(role, action, self.el(selector), selector, qid or self.guard.qid, value)
 
     def clicks(self) -> list[str]:
         return self.page.evaluate("window.__SIM_CLICKS")
 
-    def final_el(self, selector: str):
-        root = self.page.main_frame.evaluate_handle(FS_JS)
-        return root.evaluate_handle(f"r => r.querySelector({selector!r})").as_element()
-
-    def assert_blocked(self, el, host=None):
-        with self.assertRaises((Refused, FinalScreen)):
-            self.guard.click(el, host, "teste")
-        self.assertEqual(self.clicks(), [], "a guarda deixou um clique passar")
-        self.assertFalse(self.page.evaluate("window.__SIM_FINAL_SUBMITTED"))
-
-    # ---------------------------------------------------------------- tela de envio
-
-    def test_adaptive_submit_refused_disabled_enabled_and_relabeled(self):
-        for name in FINAL_PAGES:
-            with self.subTest(fixture=name):
-                self.open(name)
-                btn = self.final_el(".adaptive-assessment-submit")
-                self.assertIsNotNone(btn)
-                self.assert_blocked(btn)                                  # desabilitado
-                btn.evaluate("b => { b.disabled = false; b.classList.remove('disabled', 'is-disabled'); }")
-                self.assert_blocked(btn)                                  # habilitado
-                for label in ("Submit", "submit", "Submit Your answer will be submitted", ""):
-                    btn.evaluate("(b, l) => b.setAttribute('aria-label', l)", label)
-                    self.assert_blocked(btn)                              # aria-label alterado
-                # Mesmo fora da finalscreen visível e sem a classe, dentro dela é recusado.
-                btn.evaluate("b => b.className = 'btn-text btn__action js-btn-action'")
-                self.assert_blocked(btn)
-
-    def test_adaptive_submit_refused_even_if_finalscreen_hidden(self):
-        """A trava estrutural não depende só da visibilidade da tela."""
-        self.open("assessment.html")
-        root = self.page.main_frame.evaluate_handle(FS_JS)
-        btn = root.evaluate_handle("r => r.querySelector('.adaptive-assessment-submit')").as_element()
-        btn.evaluate("b => { b.classList.remove('disabled', 'is-disabled'); b.setAttribute('aria-label', 'submit'); }")
+    def assert_refused(self, target: Target, reason: str | None = None):
         with self.assertRaises(Refused) as ctx:
-            self.guard.click(btn, None, "teste")
-        self.assertEqual(ctx.exception.reason, "dentro de finalscreen-view")
+            self.guard.perform(target, "teste")
+        if reason:
+            self.assertIn(reason, ctx.exception.reason)
+        self.assertEqual(self.clicks(), [], "a guarda deixou uma ação passar")
+        self.assertFalse(self.page.evaluate("window.__SIM_GLOBAL"))
+
+    def inject(self, html: str):
+        return self.page.evaluate_handle(
+            "([sel, h]) => { const d = document.createElement('div'); d.innerHTML = h;"
+            " document.querySelector(sel).appendChild(d); return d.firstChild; }", [f"#{self.guard.qid}", html]).as_element()
+
+
+class ActionTests(GuardCase):
+    def test_radio_option_click(self):
+        self.open("radio.html")
+        kind = self.guard.perform(self.t("option", "#r1 input[value='1']"), "Dog")
+        self.assertEqual(kind, "alternativa")
+        self.assertTrue(self.page.evaluate("document.querySelector(\"#r1 input[value='1']\").checked"))
+        self.assertEqual(len(self.clicks()), 1)
+
+    def test_checkbox_two(self):
+        self.open("checkbox.html", "c1")
+        for v in (1, 3):
+            self.guard.perform(self.t("option", f"#c1 input[value='{v}']"))
+        self.assertEqual(self.page.evaluate("[...document.querySelectorAll('#c1 input:checked')].map(i => i.value)"), ["1", "3"])
+
+    def test_select_native(self):
+        self.open("select.html", "d1")
+        kind = self.guard.perform(self.t("option", "#d1-s0", "select", value=2))
+        self.assertEqual(kind, "dropdown nativo")
+        self.assertEqual(self.page.evaluate("document.querySelector('#d1-s0').selectedIndex"), 2)
+        self.assertEqual(self.clicks(), [])                           # escolha, não clique
+
+    def test_select_placeholder_and_missing_option_refused(self):
+        self.open("select.html", "d1")
+        self.assert_refused(self.t("option", "#d1-s0", "select", value=0), "opção desabilitada")
+        self.assert_refused(self.t("option", "#d1-s0", "select", value=9), "opção inexistente")
+        self.assertEqual(self.page.evaluate("document.querySelector('#d1-s0').selectedIndex"), 0)
+
+    def test_aria_in_shadow_dom(self):
+        host = self.open("aria.html", "a1")
+        self.assertIsNotNone(host)
+        radios = self.page.evaluate_handle("document.querySelector('quiz-item').shadowRoot.querySelectorAll('[role=radio]')")
+        mars = radios.evaluate_handle("l => l[1]").as_element()
+        self.guard.perform(Target("option", "click", mars, "Mars", "a1"))
+        self.assertEqual(mars.get_attribute("aria-checked"), "true")
+
+    def test_submit_shows_feedback_and_reset_undoes(self):
+        self.open("radio.html")
+        self.guard.perform(self.t("option", "#r1 input[value='0']"))          # errada de propósito
+        self.guard.perform(self.t("submit", "#r1 [data-sim=submit]"), "Submit")
+        self.assertEqual(self.page.evaluate("document.querySelector('#r1').dataset.result"), "incorrect")
+        self.guard.perform(self.t("reset", "#r1 [data-sim=reset]"), "Try again")
+        self.assertEqual(self.page.evaluate("document.querySelector('#r1').dataset.result"), None)
+
+    def test_dry_run_does_nothing(self):
+        self.open("radio.html", guard=Guard(self.log.append, dry_run=True))
+        self.guard.perform(self.t("option", "#r1 input[value='1']"))
+        self.guard.perform(self.t("submit", "#r1 [data-sim=submit]"))
         self.assertEqual(self.clicks(), [])
+        self.assertTrue(any("dry-run" in line for line in self.log))
 
-    def test_confirm_checkbox_never_checked(self):
-        for name in FINAL_PAGES:
-            with self.subTest(fixture=name):
-                self.open(name)
-                for sel in ("#confirm-exam", "#confirm-label"):
-                    self.assert_blocked(self.final_el(sel))
-                checked = self.page.main_frame.evaluate_handle(FS_JS).evaluate(
-                    "r => r.querySelector('#confirm-exam').checked")
-                self.assertFalse(checked)
+    def test_opener_runs_first(self):
+        self.open("radio.html")
+        opener = self.inject('<button type="button" aria-haspopup="listbox" aria-expanded="false" id="op" '
+                             'onclick="document.getElementById(\'lst\').hidden=false">Open</button>'
+                             '<div id="lst" hidden><div role="option" id="o1" aria-selected="false">Item</div></div>')
+        self.assertIsNotNone(opener)
+        option = self.el("#o1")
+        target = Target("option", "click", option, "Item", "r1", opener=Target("option", "click", self.el("#op"), "abrir", "r1"))
+        self.guard.perform(target, "Item")
+        self.assertEqual(self.el("#o1").get_attribute("aria-selected"), "true")
+        self.assertEqual(len(self.clicks()), 2)
 
-    def test_injected_submit_outside_allowed_containers_is_refused(self):
-        self.open("assessment.html")
-        loc = dom.locate(self.page.main_frame)
-        self.assertEqual(loc.mode, "assessment")
-        for html in ('<button class="js-btn-action" aria-label="Submit Your answer will be submitted">Submit</button>',
-                     '<button class="submit-button" aria-label="submit">Submit</button>',
-                     '<div role="button" aria-label="Submit">Submit</div>',
-                     '<button>Submit</button>'):
-            with self.subTest(html=html):
-                el = self.page.evaluate_handle(
-                    "h => { const d = document.createElement('div'); d.innerHTML = h; document.body.appendChild(d); return d.firstChild; }",
-                    html).as_element()
-                self.assert_blocked(el, loc.host)
 
-    def test_skip_links_and_strip_are_refused(self):
-        self.open("assessment.html")
-        loc = dom.locate(self.page.main_frame)
-        tb = self.page.main_frame.evaluate_handle(dom.js(
-            "return QH.first(document, e => e.tagName === 'ASSESSMENT-TOOLBAR-VIEW').shadowRoot;"))
-        for sel in ("#skip-all-question", "#skip-question", "label[for=skip-question]", "label[for=skip-all-question]"):
-            with self.subTest(sel=sel):
-                self.assert_blocked(tb.evaluate_handle(f"r => r.querySelector({sel!r})").as_element(), loc.host)
-        st = self.page.main_frame.evaluate_handle(dom.js(
-            "return QH.first(document, e => e.tagName === 'ASSESSMENT-BLOCK-STRIP-VIEW').shadowRoot;"))
-        for sel in ("[data-blockstrip-slider=right]", "[data-blockstrip-slider=left]", ".block-button"):
-            with self.subTest(sel=sel):
-                self.assert_blocked(st.evaluate_handle(f"r => r.querySelector({sel!r})").as_element(), loc.host)
+class InvariantTests(GuardCase):
+    def test_global_buttons_outside_question_refused(self):
+        self.open("radio.html")
+        for btn in self.page.query_selector_all("#globals button"):
+            self.assert_refused(Target("submit", "click", btn, "x", "r1"), "fora da questão atual")
 
-    def test_other_component_on_page_is_refused(self):
-        """Seção do curso: só o componente da questão atual é permitido."""
-        self.open("cyu_single.html")
-        loc = dom.locate(self.page.main_frame, "9.9.1.1 Check Your Understanding - Single")
-        other = self.page.main_frame.evaluate_handle(dom.js(
-            "const h = QH.all(document, QH.isQuestionHost).find(h => QH.q(h).dataset.socialgoodpulseId === 'other');"
-            "return QH.q(h).querySelector('.mcq__item');")).as_element()
-        self.assert_blocked(other, loc.host)
+    def test_global_labels_inside_question_refused(self):
+        self.open("radio.html")
+        for label in ("Finish quiz", "Submit all answers", "Submit page", "Submit My Assessment", "End", "Finish",
+                      "Submit exam", "Enviar tudo", "Skip All"):
+            with self.subTest(label=label):
+                btn = self.inject(f'<button type="button" id="x">{label}</button>')
+                self.assert_refused(Target("submit", "click", btn, label, "r1"))
+                self.assert_refused(Target("reset", "click", btn, label, "r1"))
 
-    # ---------------------------------------------------------------- última questão
+    def test_aria_label_cannot_hide_a_global_submit(self):
+        self.open("radio.html")
+        btn = self.inject('<button type="button" aria-label="Submit all answers">OK</button>')
+        self.assert_refused(Target("submit", "click", btn, "Submit", "r1"), "texto bloqueado")
+        btn = self.inject('<button type="button" aria-label="Finish">Submit</button>')
+        self.assert_refused(Target("submit", "click", btn, "Submit", "r1"), "blocklist")
 
-    def test_last_question_submit_leads_to_finalscreen_and_stops(self):
-        self.open("assessment.html")
-        frame = self.page.main_frame
-        for expected in (1, 2, 3):
-            loc = dom.locate(frame)
-            self.assertFalse(loc.final)
-            self.assertEqual(loc.number, (expected, 3))
-            item = dom.element(frame, loc.host, "mcq", index=0)
-            self.guard.click(item, loc.host, f"alternativa da questão {expected}")
-            if expected == 2:
-                self.guard.click(dom.element(frame, loc.host, "mcq", index=1), loc.host, "segunda alternativa")
-            self.guard.click(dom.element(frame, loc.host, "toolbar-submit"), loc.host, "Submit da barra")
-            self.page.wait_for_function(dom.js(
-                "const a = QH.first(document, e => e.classList && e.classList.contains('active-block'));"
-                f"return !!a && (a.classList.contains('review-screen-button') || a.dataset.index === '{expected + 1}');"))
-        before = len(self.clicks())
-        self.assertTrue(dom.finalscreen_visible(frame))
-        self.assertTrue(dom.locate(frame).final)
-        # Qualquer ação depois disso: nenhuma passa.
-        with self.assertRaises(FinalScreen):
-            self.guard.click(dom.element(frame, loc.host, "toolbar-submit"), loc.host, "Submit de novo")
-        with self.assertRaises(FinalScreen):
-            self.guard.click(self.final_el(".adaptive-assessment-submit"), None, "envio")
-        self.assertEqual(len(self.clicks()), before)
-        self.assertFalse(self.page.evaluate("window.__SIM_FINAL_SUBMITTED"))
-        self.assertEqual(dom.unanswered_count(frame), 0)
+    def test_adapter_label_is_not_trusted(self):
+        self.open("radio.html")
+        btn = self.inject('<button type="button">Finish quiz</button>')
+        self.assert_refused(Target("submit", "click", btn, "Submit", "r1"))
+
+    def test_submit_without_label_refused(self):
+        self.open("radio.html")
+        btn = self.inject('<button type="button"></button>')
+        self.assert_refused(Target("submit", "click", btn, "Submit", "r1"), "sem rótulo")
+
+    def test_option_text_may_contain_block_words(self):
+        """“Todas as anteriores” é resposta legítima; a blocklist vale para botões."""
+        self.open("radio.html")
+        label = self.inject('<label><input type="radio" name="r1" value="9" id="all"> All of the above, to the end</label>')
+        self.assertIsNotNone(label)
+        self.guard.perform(Target("option", "click", self.el("#all"), "All of the above", "r1"))
+        self.assertTrue(self.el("#all").is_checked())
+
+    def test_confirmation_checkbox_refused(self):
+        self.open("radio.html")
+        cb = self.inject('<label><input type="checkbox" id="cf"> Yes, confirm my submission.</label>')
+        self.assertIsNotNone(cb)
+        self.assert_refused(Target("option", "click", self.el("#cf"), "confirm", "r1"))
+
+    def test_other_question_refused(self):
+        self.open("radio.html")
+        other = self.el("#r2 input[value='1']")
+        self.assert_refused(Target("option", "click", other, "x", "r2"), "outra questão")          # qid diferente
+        self.assert_refused(Target("option", "click", other, "x", "r1"), "fora da questão atual")  # qid mentido
+        self.assertFalse(self.el("#r2 input[value='1']").is_checked())
+
+    def test_unbound_guard_refuses(self):
+        self.page.goto(self.server.url("radio.html"))
+        with self.assertRaises(Refused):
+            Guard(self.log.append).perform(Target("option", "click", self.el("#r1 input"), "x", "r1"))
+
+    def test_invalid_role_action_and_element_types(self):
+        self.open("radio.html")
+        radio = "#r1 input[value='1']"
+        self.assert_refused(self.t("submit", radio), "não permitido")                  # rádio não é Submit
+        self.assert_refused(self.t("option", radio, "select", value=0), "não permitido")
+        self.assert_refused(Target("hack", "click", self.el(radio), "x", "r1"), "inválido")
+        self.assert_refused(Target("option", "type", self.el(radio), "x", "r1"), "inválido")
+        link = self.inject('<a href="#end" id="lk">Go</a>')
+        self.assert_refused(Target("option", "click", link, "x", "r1"), "não permitido")
+        resetter = self.inject('<input type="reset" value="Clear" id="rs">')
+        self.assert_refused(Target("reset", "click", resetter, "x", "r1"), "não permitido")
+        legend = self.el("#r1 legend")
+        self.assert_refused(Target("option", "click", legend, "x", "r1"), "não permitido")
+
+    def test_disabled_and_hidden_refused(self):
+        self.open("radio.html")
+        self.page.evaluate("document.querySelector(\"#r1 input[value='2']\").disabled = true")
+        self.assert_refused(self.t("option", "#r1 input[value='2']"), "desabilitado")
+        self.page.evaluate("document.querySelector(\"#r1 input[value='3']\").parentElement.style.display = 'none'")
+        self.assert_refused(self.t("option", "#r1 input[value='3']"), "invisível")
+        self.page.evaluate("document.querySelector('#r1 fieldset').disabled = true")
+        self.assert_refused(self.t("option", "#r1 input[value='0']"), "desabilitado")
+
+    def test_submit_that_would_send_other_questions_refused(self):
+        self.open("oneform.html", "f1")
+        btn = self.page.evaluate_handle("""() => { const b = document.querySelector('#f button[type=submit]');
+            document.querySelector('#f1').appendChild(b); return b; }""").as_element()
+        self.assert_refused(Target("submit", "click", btn, "Submit", "f1"), "outras questões")
+
+    def test_element_covered_by_another_is_refused(self):
+        self.open("radio.html")
+        self.page.evaluate("""() => { const d = document.createElement('div'); d.id = 'cover';
+            const r = document.querySelector("#r1 input[value='1']").getBoundingClientRect();
+            d.style.cssText = `position:fixed;left:${r.left - 5}px;top:${r.top - 5}px;width:${r.width + 10}px;height:${r.height + 10}px;background:red`;
+            document.body.appendChild(d); }""")
+        self.assert_refused(self.t("option", "#r1 input[value='1']"), "por cima")
+        self.assertFalse(self.el("#r1 input[value='1']").is_checked())
+
+    def test_extra_block_terms_only_add(self):
+        g = Guard(self.log.append, extra_block=["Check answer", "recomeçar"])
+        for word in ("all", "assessment", "exam", "finish", "end"):
+            self.assertIn(word, g.block)
+        self.assertTrue(set(BLOCK_WORDS) <= set(g.block))
+        self.assertIn("recomecar", g.block)
+        self.assertIn("check answer", g.phrases)
+        self.open("aria.html", "a1", guard=g)
+        btn = self.page.evaluate_handle("document.querySelector('quiz-item').shadowRoot.querySelector('[data-sim=submit]')").as_element()
+        self.assert_refused(Target("submit", "click", btn, "Check answer", "a1"), "texto bloqueado")
+
+    def test_result_screen_stops_without_acting(self):
+        self.open("radio.html")
+        target = self.t("option", "#r1 input[value='1']")
+        self.page.evaluate("""() => { document.querySelector('#r1').style.display = 'none';
+            const h = document.createElement('h2'); h.textContent = 'Quiz complete'; document.body.appendChild(h); }""")
+        with self.assertRaises(ResultScreen):
+            self.guard.perform(target, "Dog")
+        self.assertEqual(self.clicks(), [])
+        self.assertTrue(self.guard.result_visible())
+
+    def test_result_page_is_detected_and_question_page_is_not(self):
+        self.page.goto(self.server.url("result.html"))
+        self.assertTrue(Guard(self.log.append).result_visible(self.page.main_frame))
+        self.page.goto(self.server.url("radio.html"))
+        self.assertFalse(Guard(self.log.append).result_visible(self.page.main_frame))
+
+    def test_hidden_question_without_result_text_is_a_plain_refusal(self):
+        self.open("radio.html")
+        target = self.t("option", "#r1 input[value='1']")
+        self.page.evaluate("document.querySelector('#r1').style.display = 'none'")
+        self.assert_refused(target, "não está visível")
 
 
 class SourceTests(unittest.TestCase):
     def test_only_guard_acts_on_the_page(self):
         """Nenhum módulo além de guard.py chama métodos de ação do Playwright."""
         pattern = re.compile(r"(?<!guard)\.(click|dblclick|check|uncheck|set_checked|select_option|drag_to|tap|press|"
-                             r"press_sequentially|type|fill|dispatch_event|hover)\(|\.mouse\.|\.keyboard\.")
-        pkg = REPO / "lib" / "quizhelper"
+                             r"press_sequentially|type|fill|dispatch_event|hover|focus|set_input_files)\(|\.mouse\.|\.keyboard\.")
         offenders = []
-        for path in sorted(pkg.glob("*.py")):
-            if path.name == "guard.py":
-                continue
-            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                if pattern.search(line):
-                    offenders.append(f"{path.name}:{n}: {line.strip()}")
+        for pkg in (REPO / "lib" / "dracaena", REPO / "lib" / "quizhelper"):
+            for path in sorted(pkg.rglob("*.py")):
+                if path.name == "guard.py":
+                    continue
+                for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                    if pattern.search(line):
+                        offenders.append(f"{path.relative_to(REPO)}:{n}: {line.strip()}")
         self.assertEqual(offenders, [])
-        guard_src = (pkg / "guard.py").read_text(encoding="utf-8")
+        guard_src = (REPO / "lib" / "dracaena" / "guard.py").read_text(encoding="utf-8")
         self.assertEqual(guard_src.count("hit.click()"), 1, "guard.py deve ter um único ponto de clique")
         self.assertNotIn(".click(timeout", guard_src, "guard.py não usa o clique do Playwright")
+        self.assertEqual(len(re.findall(r"\.selectedIndex\s*=", guard_src)), 1, "um único ponto de escolha")
+
+    def test_blocklist_is_a_code_constant(self):
+        for word in ("all", "assessment", "exam", "finish", "end"):
+            self.assertIn(word, BLOCK_WORDS)
+        self.assertIsInstance(BLOCK_WORDS, frozenset)
 
 
 if __name__ == "__main__":

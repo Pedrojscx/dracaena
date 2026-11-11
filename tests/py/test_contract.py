@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import unittest
 
-from quizhelper import contract
+from dracaena.core import contract
+from dracaena.core.model import Choice, Item, Option, Question
 
-Q = {"kind": "SINGLE", "options": [{"index": i, "text": str(i)} for i in range(6)]}
-Q_MULTI = {"kind": "MULTI", "expected": 2, "options": [{"index": i, "text": str(i)} for i in range(5)]}
+Q = Question("q", "SINGLE", "enunciado sintético", options=tuple(Option(i, str(i)) for i in range(6)))
+Q_MULTI = Question("q", "MULTI", "enunciado sintético", options=tuple(Option(i, str(i)) for i in range(5)), expected=2)
+Q_DROP = Question("q", "DROPDOWN", "enunciado sintético", items=(
+    Item("a", tuple(Choice(i, str(i)) for i in range(3))), Item("b", tuple(Choice(i, str(i)) for i in range(2)))))
 
 
 class ParseTest(unittest.TestCase):
@@ -51,10 +54,40 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(contract.schema_for(Q)["properties"]["type"], {"const": "SINGLE"})
 
 
+    def test_dropdown_cobertura_total(self):
+        ok = '{"type":"DROPDOWN","items":[{"item":1,"option":0},{"item":0,"option":2}]}'
+        self.assertEqual(contract.parse_validated(ok, Q_DROP)["items"], [{"item": 0, "option": 2}, {"item": 1, "option": 0}])
+        with self.assertRaisesRegex(contract.ContractError, "1 de 2 itens"):
+            contract.parse_validated('{"type":"DROPDOWN","items":[{"item":0,"option":1}]}', Q_DROP)
+        with self.assertRaisesRegex(contract.ContractError, "repetido"):
+            contract.parse_validated('{"type":"DROPDOWN","items":[{"item":0,"option":1},{"item":0,"option":2}]}', Q_DROP)
+        with self.assertRaisesRegex(contract.ContractError, "fora de 0..1"):
+            contract.parse_validated('{"type":"DROPDOWN","items":[{"item":0,"option":1},{"item":1,"option":2}]}', Q_DROP)
+
+    def test_tipo_diferente_e_indice_nao_inteiro(self):
+        with self.assertRaisesRegex(contract.ContractError, "esperado 'SINGLE'"):
+            contract.parse_validated('{"type":"MULTI","answers":[1,2]}', Q)
+        with self.assertRaisesRegex(contract.ContractError, "inteiro"):
+            contract.parse_validated('{"type":"SINGLE","answers":["1"]}', Q)
+        with self.assertRaisesRegex(contract.ContractError, "repetido"):
+            contract.parse_validated('{"type":"MULTI","answers":[1,1]}', Q_MULTI)
+
+    def test_texto_da_questao_e_legivel(self):
+        text = contract.question_text(Q_MULTI)
+        self.assertIn("Tipo: MULTI", text)
+        self.assertIn("Quantidade pedida: 2", text)
+        self.assertIn("[4] 4", text)
+        self.assertEqual(contract.readable({"type": "MULTI", "answers": [1, 3]}, Q_MULTI), "• 1\n• 3")
+        self.assertIn("Item [1]: b", contract.question_text(Q_DROP))
+
+    def test_dicionario_legado_e_aceito(self):
+        legacy = {"kind": "SINGLE", "stem": "x", "options": [{"index": 0, "text": "a"}, {"index": 1, "text": "b"}]}
+        self.assertEqual(contract.parse_validated('{"type":"SINGLE","answers":[1]}', legacy)["answers"], [1])
+
 
 class ModelTest(unittest.TestCase):
     def test_modelo_e_retry(self):
-        from quizhelper import claude
+        from dracaena.core import claude
         self.assertEqual(claude.model_for({}), "haiku")
         self.assertEqual(claude.model_for({"MODEL": "haiku", "RETRY_MODEL": ""}, retry=True), "haiku")
         self.assertEqual(claude.model_for({"MODEL": "haiku", "RETRY_MODEL": "sonnet"}), "haiku")

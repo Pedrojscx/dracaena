@@ -1,4 +1,4 @@
-Abaixo está uma questão de um curso Cisco NetAcad (IT Essentials), extraída da página como texto. Sua resposta anterior foi REJEITADA pelo validador.
+Abaixo está uma questão de uma atividade de prática, extraída da página como texto. Sua resposta anterior foi REJEITADA pelo validador.
 Resposta anterior (inteira):
 <<<
 {PREVIOUS}
@@ -9,7 +9,5 @@ Responda de novo. Pense, se precisar, em no máximo 3 linhas; a ÚLTIMA linha da
 - MULTI: {"type":"MULTI","answers":[<índice>,<índice>]} com exatamente a quantidade pedida
 - DROPDOWN: {"type":"DROPDOWN","items":[{"item":<índice do item>,"option":<índice da opção>}]} com um objeto por item
 - MATCH: {"type":"MATCH","pairs":[{"right":<índice da direita>,"left":"<letra da esquerda>"}]} com um par por item da direita
-
-Responda segundo o conteúdo e a terminologia do curso Cisco IT Essentials 8, mesmo quando outra alternativa parecer tecnicamente mais completa.
 
 {QUESTION}
