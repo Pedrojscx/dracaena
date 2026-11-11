@@ -16,8 +16,14 @@ INT_MIN, INT_MAX = -(2**31) + 1, 2**31 - 1
 
 
 def _label(entry: dict[str, Any]) -> str:
-    text = str(entry.get("description") or entry["key"]).strip()
+    """``label`` (pt-BR) do schema; sem ele, cai para ``description`` e depois para a chave."""
+    text = str(entry.get("label") or entry.get("description") or entry["key"]).strip()
     return text[:1].upper() + text[1:]
+
+
+def _hint(entry: dict[str, Any]) -> str:
+    """Dica sob o campo: ``description`` (só quando há ``label``; senão ela já virou rótulo)."""
+    return str(entry.get("description") or "").strip() if entry.get("label") else ""
 
 
 class _Field:
@@ -63,7 +69,7 @@ class _Field:
             self.get, self.set = w.text, lambda v: w.setText(str(v))
             w.textChanged.connect(lambda _=None: on_change())
         w.setObjectName(f"field_{entry['key']}")
-        tip = f"{entry['key']} — padrão: {entry.get('default')!r}"
+        tip = f"{_hint(entry) or _label(entry)}\n\n{entry['key']} — padrão: {entry.get('default')!r}"
         if lo is not None or hi is not None:
             tip += f" — faixa: {lo}..{hi}"
         w.setToolTip(tip)
@@ -89,10 +95,12 @@ class SettingsForm(QWidget):
             col.setContentsMargins(0, 0, 0, 0)
             col.setSpacing(0)
             col.addWidget(field.widget)
-            key = QLabel(entry["key"])
-            key.setObjectName(f"key_{entry['key']}")
-            key.setStyleSheet("color: gray; font-size: 10px;")
-            col.addWidget(key)
+            hint = _hint(entry)
+            note = QLabel(hint or entry["key"])
+            note.setObjectName(f"hint_{entry['key']}" if hint else f"key_{entry['key']}")
+            note.setWordWrap(True)
+            note.setStyleSheet("color: gray; font-size: 10px;")
+            col.addWidget(note)
             form.addRow(_label(entry), row)
             field.set(values.get(entry["key"], entry.get("default")))
         self.baseline = self.values()

@@ -82,22 +82,28 @@ class FakeClient(QObject):
 
 
 class DaemonTransport(QObject):
-    """Fala com o daemon simulado real por socket Unix (síncrono; só para testes)."""
+    """Fala com o daemon simulado real por socket Unix, sem bloquear a GUI (só para testes).
+
+    Uma conexão assina os eventos (state, probe, shortcut_test); as respostas voltam pelo ``id``.
+    ``extra_args[cmd]`` acrescenta argumentos de teste a um comando (ex.: ``simulate_error``).
+    """
     connected = Signal()
     disconnected = Signal()
     event_received = Signal(object)
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, events=("state", "probe", "shortcut_test")) -> None:
         super().__init__()
+        self.path = path
         self._rid = 0
         self.is_connected = True
-        self._req = self._open(path)
-        self._ev = self._open(path)
-        self._send(self._ev, "subscribe", {"events": ["state"]})
-        self._ev_buf = b""
-        self._ev.setblocking(False)
+        self.extra_args: dict[str, dict] = {}
+        self._pending: dict[int, Callable] = {}
+        self._buf = b""
+        self._sock = self._open(path)
+        self._write("subscribe", {"events": list(events)})
+        self._sock.setblocking(False)
         self._timer = QTimer(self)
-        self._timer.setInterval(10)
+        self._timer.setInterval(5)
         self._timer.timeout.connect(self._poll)
         self._timer.start()
 
@@ -108,47 +114,52 @@ class DaemonTransport(QObject):
         s.connect(path)
         return s
 
-    def _send(self, sock, cmd, args) -> int:
+    def _write(self, cmd, args) -> int:
         self._rid += 1
-        sock.sendall((json.dumps({"v": 0, "id": self._rid, "cmd": cmd, "args": args}) + "\n").encode())
+        self._sock.sendall((json.dumps({"v": 0, "id": self._rid, "cmd": cmd, "args": args}) + "\n").encode())
         return self._rid
 
-    @staticmethod
-    def _line(sock, buf=b"") -> tuple[dict, bytes]:
-        while b"\n" not in buf:
-            chunk = sock.recv(65536)
-            if not chunk:
-                raise ConnectionError("daemon fechou a conexão")
-            buf += chunk
-        line, rest = buf.split(b"\n", 1)
-        return json.loads(line), rest
-
     def request(self, cmd, args=None, callback=None) -> int:
-        rid = self._send(self._req, cmd, args or {})
-        raw, _ = self._line(self._req)
-        resp = Resp(raw.get("id", rid), raw["ok"], raw.get("data"), raw.get("error"), raw.get("code"))
+        args = {**(args or {}), **self.extra_args.get(cmd, {})}
+        rid = self._write(cmd, args)
         if callback:
-            QTimer.singleShot(0, lambda: callback(resp))
+            self._pending[rid] = callback
         return rid
 
     def _poll(self) -> None:
+        while True:
+            try:
+                chunk = self._sock.recv(65536)
+            except (BlockingIOError, OSError):
+                return
+            if not chunk:
+                return
+            self._buf += chunk
+            while b"\n" in self._buf:
+                line, self._buf = self._buf.split(b"\n", 1)
+                msg = json.loads(line)
+                if "event" in msg:
+                    self.event_received.emit(msg)
+                    continue
+                cb = self._pending.pop(msg.get("id"), None)
+                if cb:
+                    cb(Resp(msg.get("id"), msg["ok"], msg.get("data"), msg.get("error"), msg.get("code")))
+
+    def raw(self, cmd, args=None) -> dict:
+        """Pedido síncrono por OUTRO socket (ex.: o ``toggle`` que o compositor dispararia)."""
+        other = self._open(self.path)
         try:
-            chunk = self._ev.recv(65536)
-        except BlockingIOError:
-            return
-        except OSError:
-            return
-        self._ev_buf += chunk
-        while b"\n" in self._ev_buf:
-            line, self._ev_buf = self._ev_buf.split(b"\n", 1)
-            msg = json.loads(line)
-            if "event" in msg:
-                self.event_received.emit(msg)
+            other.sendall((json.dumps({"v": 0, "id": 1, "cmd": cmd, "args": args or {}}) + "\n").encode())
+            buf = b""
+            while b"\n" not in buf:
+                buf += other.recv(65536)
+            return json.loads(buf.split(b"\n", 1)[0])
+        finally:
+            other.close()
 
     def close(self) -> None:
         self._timer.stop()
-        for s in (self._req, self._ev):
-            s.close()
+        self._sock.close()
 
 
 def _imports_platformdirs(python: str) -> bool:
@@ -204,7 +215,9 @@ class SimulatedDaemon:
         end = time.monotonic() + 8
         while time.monotonic() < end and not self.sock.exists():
             if self.proc.poll() is not None:
-                raise RuntimeError("daemon simulado saiu: " + (self.proc.stderr.read() or b"").decode()[-400:])
+                detail = (self.proc.stderr.read() or b"").decode()[-400:]
+                shutil.rmtree(self.tmp, ignore_errors=True)
+                raise RuntimeError("daemon simulado saiu: " + detail)
             time.sleep(0.05)
         if not self.sock.exists():
             self.stop()
@@ -301,7 +314,8 @@ class ContractFake(FakeClient):
             if "desconhecido" in toml:
                 return Resp(rid, False, error="linha 2: campo desconhecido “desconhecido”", code="bad_request")
             if name in self.saved and not args.get("overwrite"):
-                return Resp(rid, False, error="o site já existe", code="bad_request")
+                return Resp(rid, False, error="Já existe um site com esse nome; confirme a substituição (overwrite)",
+                            code="bad_request")
             self.saved[name] = toml
             if not any(s["name"] == name for s in self.sites):
                 self.sites.append({"name": name, "version": 0})
