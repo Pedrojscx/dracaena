@@ -493,41 +493,40 @@ class ToggleCommandTests(unittest.TestCase):
     def test_three_modes(self):
         import tempfile
         from pathlib import Path
-        from dracaena.platform.launcher import toggle_command
+        from dracaena.platform.launcher import launch_cmd, toggle_command
         with tempfile.TemporaryDirectory() as directory:
             appdir = Path(directory) / "mnt"
             (appdir / "usr/bin").mkdir(parents=True)
             inside = str(appdir / "usr/bin/dracaena")
             env = {"APPIMAGE": "/opt/Dracaena.AppImage", "APPDIR": str(appdir)}
+            self.assertEqual(launch_cmd(env, frozen=True, executable=inside), ["/opt/Dracaena.AppImage"])
+            self.assertEqual(launch_cmd({}, frozen=True, executable="C:/App/dracaena.exe"), ["C:/App/dracaena.exe"])
+            self.assertEqual(launch_cmd({}, frozen=False, executable="/usr/bin/python3"), ["/usr/bin/python3", "-m", "dracaena"])
             self.assertEqual(toggle_command(env, frozen=True, executable=inside), ["/opt/Dracaena.AppImage", "toggle"])
-            self.assertEqual(toggle_command({}, frozen=True, executable="C:/App/dracaena.exe"), ["C:/App/dracaena.exe", "toggle"])
-            self.assertEqual(toggle_command({}, frozen=False, executable="/usr/bin/python3"),
-                             ["/usr/bin/python3", "-m", "dracaena.cli", "toggle"])
 
     def test_inherited_appimage_of_another_app_is_ignored(self):
         import tempfile
         from pathlib import Path
-        from dracaena.platform.launcher import toggle_command
+        from dracaena.platform.launcher import launch_cmd
         with tempfile.TemporaryDirectory() as directory:
             other = {"APPIMAGE": "/home/u/Applications/Outro.AppImage", "APPDIR": str(Path(directory) / "outro")}
-            dev = ["/usr/bin/python3", "-m", "dracaena.cli", "toggle"]
-            self.assertEqual(toggle_command(other, frozen=False, executable="/usr/bin/python3"), dev)
-            self.assertEqual(toggle_command({"APPIMAGE": other["APPIMAGE"]}, frozen=False, executable="/usr/bin/python3"), dev)
+            dev = ["/usr/bin/python3", "-m", "dracaena"]
+            self.assertEqual(launch_cmd(other, frozen=False, executable="/usr/bin/python3"), dev)
+            self.assertEqual(launch_cmd({"APPIMAGE": other["APPIMAGE"]}, frozen=False, executable="/usr/bin/python3"), dev)
             # congelado, mas fora do $APPDIR (ex.: PyInstaller instalado ao lado de outro AppImage)
-            self.assertEqual(toggle_command(other, frozen=True, executable="/opt/dracaena/dracaena"),
-                             ["/opt/dracaena/dracaena", "toggle"])
+            self.assertEqual(launch_cmd(other, frozen=True, executable="/opt/dracaena/dracaena"), ["/opt/dracaena/dracaena"])
             # $APPDIR definido, mas sem build congelado
             inside = str(Path(directory) / "outro/usr/bin/python")
-            self.assertEqual(toggle_command(other, frozen=False, executable=inside), [inside, "-m", "dracaena.cli", "toggle"])
+            self.assertEqual(launch_cmd(other, frozen=False, executable=inside), [inside, "-m", "dracaena"])
             # prefixo parecido não conta como "dentro"
             sibling = str(Path(directory) / "outro-x/dracaena")
-            self.assertEqual(toggle_command(other, frozen=True, executable=sibling), [sibling, "toggle"])
+            self.assertEqual(launch_cmd(other, frozen=True, executable=sibling), [sibling])
 
     def test_symlink_escape_from_appdir_is_not_inside(self):
         import os
         import tempfile
         from pathlib import Path
-        from dracaena.platform.launcher import toggle_command
+        from dracaena.platform.launcher import launch_cmd
         if os.name == "nt":
             self.skipTest("symlinks exigem privilégio no Windows")
         with tempfile.TemporaryDirectory() as directory:
@@ -537,7 +536,28 @@ class ToggleCommandTests(unittest.TestCase):
             (outside / "bin").write_text("")
             (appdir / "bin").symlink_to(outside / "bin")
             env = {"APPIMAGE": "/opt/X.AppImage", "APPDIR": str(appdir)}
-            self.assertEqual(toggle_command(env, frozen=True, executable=str(appdir / "bin")), [str(appdir / "bin"), "toggle"])
+            self.assertEqual(launch_cmd(env, frozen=True, executable=str(appdir / "bin")), [str(appdir / "bin")])
+
+    def test_toggle_command_is_launch_cmd_plus_toggle(self):
+        from dracaena.platform.launcher import launch_cmd, toggle_command
+        for frozen in (True, False):
+            self.assertEqual(toggle_command({}, frozen, "x"), launch_cmd({}, frozen, "x") + ["toggle"])
+        self.assertEqual(toggle_command(), launch_cmd() + ["toggle"])
+
+    def test_dev_command_really_runs(self):
+        import json
+        import subprocess
+        import sys
+        from dracaena.platform.launcher import launch_cmd
+        command = launch_cmd({}, frozen=False, executable=sys.executable) + ["toggle"]
+        self.assertEqual(command[1:], ["-m", "dracaena", "toggle"])
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            env = {**os.environ, "XDG_RUNTIME_DIR": directory}
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30, env=env)
+        self.assertEqual(result.returncode, 1)  # sem daemon: erro claro em português, não traceback
+        self.assertIn("não está em execução", json.loads(result.stdout)["error"])
 
     def test_defaults_follow_the_running_interpreter(self):
         import sys

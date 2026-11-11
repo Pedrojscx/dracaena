@@ -19,17 +19,22 @@ def _inside_our_appimage(environ, frozen, executable):
         return False
 
 
-def toggle_command(environ=None, frozen=None, executable=None):
-    """Retorna o argv de `toggle` conforme o modo de execução.
+def launch_cmd(environ=None, frozen=None, executable=None):
+    """argv base que inicia o Dracaena conforme o modo de execução (sem subcomando).
 
     Nosso AppImage tem prioridade, depois build congelado (PyInstaller) e, por fim,
-    o ambiente de desenvolvimento.
+    o ambiente de desenvolvimento (`python -m dracaena`).
     """
     environ = os.environ if environ is None else environ
     frozen = getattr(sys, "frozen", False) if frozen is None else frozen
     executable = sys.executable if executable is None else executable
     if _inside_our_appimage(environ, frozen, executable):
-        return [environ["APPIMAGE"], "toggle"]
+        return [environ["APPIMAGE"]]
     if frozen:
-        return [executable, "toggle"]
-    return [executable, "-m", "dracaena.cli", "toggle"]
+        return [executable]
+    return [executable, "-m", "dracaena"]
+
+
+def toggle_command(environ=None, frozen=None, executable=None):
+    """argv de `toggle` para atalhos do sistema: launch_cmd() + ["toggle"]."""
+    return launch_cmd(environ, frozen, executable) + ["toggle"]
