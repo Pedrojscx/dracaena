@@ -7,19 +7,32 @@ from .paths import config_dir, private_dir
 from .resources import default_config
 
 DEFAULTS = json.loads(default_config())
-RANGES = {"CLAUDE_TIMEOUT": (1, 3600), "MAX_QUESTIONS": (1, 1000), "KEEP_DAYS": (1, 3650),
-          "CLICK_SUBMIT": (0, 1), "RETRY_ON_INCORRECT": (0, 1)}
+# Tabela única das chaves editáveis: validação (min/max/choices) e schema saem dela.
+FIELDS = {
+    "MODEL": dict(label="Modelo", description="Modelo do Claude usado para responder às questões (por exemplo, haiku, sonnet ou opus)."),
+    "RETRY_MODEL": dict(label="Modelo da nova tentativa", description="Modelo usado ao tentar de novo depois de uma resposta incorreta. Vazio usa o mesmo modelo."),
+    "CLAUDE_TIMEOUT": dict(label="Tempo limite do Claude (s)", description="Segundos de espera pela resposta do Claude antes de desistir da questão.", min=1, max=3600),
+    "CLAUDE_BIN": dict(label="Executável do Claude", description="Caminho do Claude Code. Vazio procura o comando 'claude' no PATH."),
+    "BROWSER_BIN": dict(label="Navegador", description="Caminho de um navegador baseado em Chromium. Vazio usa o navegador padrão detectado."),
+    "BROWSER_FALLBACK": dict(label="Navegador reserva", description="Usado só quando nenhum navegador estiver configurado ou detectado. 'playwright' usa o Chromium do Playwright; vazio desativa.", choices=["", "playwright"]),
+    "MAX_QUESTIONS": dict(label="Máximo de questões", description="Quantidade máxima de questões respondidas por sessão.", min=1, max=1000),
+    "KEEP_DAYS": dict(label="Dias de retenção", description="Dias em que registros e respostas locais são mantidos antes da limpeza.", min=1, max=3650),
+    "CLICK_SUBMIT": dict(label="Enviar a prática automaticamente", description="1 clica no botão de envio da prática depois de marcar a resposta; 0 apenas marca.", min=0, max=1),
+    "RETRY_ON_INCORRECT": dict(label="Tentar de novo se incorreta", description="1 tenta outra vez quando a prática indicar resposta incorreta; 0 segue adiante.", min=0, max=1),
+}
+assert set(FIELDS) == set(DEFAULTS), "FIELDS e default.json devem ter as mesmas chaves"
+RANGES = {key: (field["min"], field["max"]) for key, field in FIELDS.items() if "min" in field}
 
 
 def schema():
     result = []
     for key, default in DEFAULTS.items():
+        field = FIELDS[key]
         entry = dict(key=key, type="integer" if type(default) is int else "string", default=default,
-                     description=key.lower().replace("_", " "))
-        if key in RANGES:
-            entry.update(min=RANGES[key][0], max=RANGES[key][1])
-        if key == "BROWSER_FALLBACK":
-            entry["choices"] = ["", "playwright"]
+                     label=field["label"], description=field["description"])
+        for extra in ("min", "max", "choices"):
+            if extra in field:
+                entry[extra] = field[extra]
         result.append(entry)
     return result
 
@@ -29,7 +42,7 @@ def validate(key, value):
         raise ValueError("Chave desconhecida ou tipo de valor inválido")
     if key in RANGES and not RANGES[key][0] <= value <= RANGES[key][1]:
         raise ValueError("Valor fora do intervalo permitido")
-    if key == "BROWSER_FALLBACK" and value not in ("", "playwright"):
+    if "choices" in FIELDS[key] and value not in FIELDS[key]["choices"]:
         raise ValueError("Fallback de navegador não suportado")
     return value
 
