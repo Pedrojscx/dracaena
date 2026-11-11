@@ -369,7 +369,7 @@ class SitesSaveTests(unittest.TestCase):
         if os.name != "nt":
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         again = ask(daemon, "sites.save", {"name": "demo", "toml": self.TOML.replace("1", "2")})
-        self.assertEqual((again["ok"], again["code"]), (False, "bad_state"))
+        self.assertEqual((again["ok"], again["code"]), (False, "bad_request"))
         self.assertIn("1", path.read_text())
         replaced = ask(daemon, "sites.save", {"name": "demo", "toml": self.TOML.replace("1", "2"), "overwrite": True})
         self.assertTrue(replaced["ok"])
@@ -488,14 +488,53 @@ class ConfigSchemaTests(unittest.TestCase):
 
 class ToggleCommandTests(unittest.TestCase):
     def test_three_modes(self):
+        import tempfile
+        from pathlib import Path
         from dracaena.platform.launcher import toggle_command
-        self.assertEqual(toggle_command({"APPIMAGE": "/opt/Dracaena.AppImage"}, frozen=True, executable="/tmp/.mount/dracaena"),
-                         ["/opt/Dracaena.AppImage", "toggle"])
-        self.assertEqual(toggle_command({}, frozen=True, executable="C:/App/dracaena.exe"), ["C:/App/dracaena.exe", "toggle"])
-        self.assertEqual(toggle_command({}, frozen=False, executable="/usr/bin/python3"),
-                         ["/usr/bin/python3", "-m", "dracaena.cli", "toggle"])
-        self.assertEqual(toggle_command({"APPIMAGE": ""}, frozen=False, executable="py"), ["py", "-m", "dracaena.cli", "toggle"])
-        self.assertEqual(toggle_command({"APPIMAGE": "relativo"}, frozen=False, executable="py")[1:2], ["-m"])
+        with tempfile.TemporaryDirectory() as directory:
+            appdir = Path(directory) / "mnt"
+            (appdir / "usr/bin").mkdir(parents=True)
+            inside = str(appdir / "usr/bin/dracaena")
+            env = {"APPIMAGE": "/opt/Dracaena.AppImage", "APPDIR": str(appdir)}
+            self.assertEqual(toggle_command(env, frozen=True, executable=inside), ["/opt/Dracaena.AppImage", "toggle"])
+            self.assertEqual(toggle_command({}, frozen=True, executable="C:/App/dracaena.exe"), ["C:/App/dracaena.exe", "toggle"])
+            self.assertEqual(toggle_command({}, frozen=False, executable="/usr/bin/python3"),
+                             ["/usr/bin/python3", "-m", "dracaena.cli", "toggle"])
+
+    def test_inherited_appimage_of_another_app_is_ignored(self):
+        import tempfile
+        from pathlib import Path
+        from dracaena.platform.launcher import toggle_command
+        with tempfile.TemporaryDirectory() as directory:
+            other = {"APPIMAGE": "/home/u/Applications/Outro.AppImage", "APPDIR": str(Path(directory) / "outro")}
+            dev = ["/usr/bin/python3", "-m", "dracaena.cli", "toggle"]
+            self.assertEqual(toggle_command(other, frozen=False, executable="/usr/bin/python3"), dev)
+            self.assertEqual(toggle_command({"APPIMAGE": other["APPIMAGE"]}, frozen=False, executable="/usr/bin/python3"), dev)
+            # congelado, mas fora do $APPDIR (ex.: PyInstaller instalado ao lado de outro AppImage)
+            self.assertEqual(toggle_command(other, frozen=True, executable="/opt/dracaena/dracaena"),
+                             ["/opt/dracaena/dracaena", "toggle"])
+            # $APPDIR definido, mas sem build congelado
+            inside = str(Path(directory) / "outro/usr/bin/python")
+            self.assertEqual(toggle_command(other, frozen=False, executable=inside), [inside, "-m", "dracaena.cli", "toggle"])
+            # prefixo parecido não conta como "dentro"
+            sibling = str(Path(directory) / "outro-x/dracaena")
+            self.assertEqual(toggle_command(other, frozen=True, executable=sibling), [sibling, "toggle"])
+
+    def test_symlink_escape_from_appdir_is_not_inside(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from dracaena.platform.launcher import toggle_command
+        if os.name == "nt":
+            self.skipTest("symlinks exigem privilégio no Windows")
+        with tempfile.TemporaryDirectory() as directory:
+            appdir, outside = Path(directory) / "app", Path(directory) / "fora"
+            appdir.mkdir()
+            outside.mkdir()
+            (outside / "bin").write_text("")
+            (appdir / "bin").symlink_to(outside / "bin")
+            env = {"APPIMAGE": "/opt/X.AppImage", "APPDIR": str(appdir)}
+            self.assertEqual(toggle_command(env, frozen=True, executable=str(appdir / "bin")), [str(appdir / "bin"), "toggle"])
 
     def test_defaults_follow_the_running_interpreter(self):
         import sys

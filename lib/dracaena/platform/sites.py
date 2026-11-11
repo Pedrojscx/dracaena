@@ -32,7 +32,7 @@ def validate(name, toml, overwrite=False):
 
 
 class SiteExists(Exception):
-    code = "bad_state"
+    code = "bad_request"
 
 
 def save(name, toml, overwrite=False, write=True):
