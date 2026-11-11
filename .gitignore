@@ -118,3 +118,8 @@ doctor-*.json
 doctor-*.txt
 chromium/
 chromium-profile*/
+
+# B2: ambiente e artefatos de distribuição locais
+/.venv-b2/
+/build/
+/dist/

@@ -7,8 +7,15 @@ if (( $# )); then
     exit 2
 fi
 cd "$REPO" || exit 1
-PYTHON="${QH_PYTHON:-${XDG_DATA_HOME:-$HOME/.local/share}/quiz-helper/venv/bin/python}"
-[[ -x "$PYTHON" ]] || PYTHON="$(command -v python3)"
+# Ordem: QH_PYTHON; venv do repositório (.venv, .venv-*); venv do instalador; python3.
+PYTHON="${QH_PYTHON:-}"
+if [[ -z "$PYTHON" ]]; then
+    for candidate in "$REPO/.venv/bin/python" "$REPO"/.venv-*/bin/python \
+        "${XDG_DATA_HOME:-$HOME/.local/share}/quiz-helper/venv/bin/python"; do
+        if [[ -x "$candidate" ]]; then PYTHON="$candidate"; break; fi
+    done
+fi
+[[ -x "${PYTHON:-}" ]] || PYTHON="$(command -v python3)"
 # Isola qualquer leitura de configuração/perfil pessoal, preservando só o cache
 # do executável Chromium de testes (não é o perfil do navegador do usuário).
 export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-${XDG_CACHE_HOME:-$HOME/.cache}/ms-playwright}"
