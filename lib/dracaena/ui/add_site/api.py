@@ -77,17 +77,17 @@ def probe_progress(event: Any) -> tuple[int, int, str] | None:
 
 
 def sites_save(client, name: str, toml: str, overwrite: bool,
-               on_done: Callable[[str, str], None]) -> None:
-    """``on_done(caminho, erro)``."""
+               on_done: Callable[[str, str, str], None]) -> None:
+    """``on_done(caminho, erro, codigo)``."""
     args: dict[str, Any] = {"name": name, "toml": toml}
     if overwrite:
         args["overwrite"] = True
 
     def done(resp) -> None:
         if not reply.is_ok(resp):
-            return on_done("", reply.error_text(resp))
+            return on_done("", reply.error_text(resp), reply.error_code(resp))
         data = reply.payload(resp)
-        on_done(str(data.get("path", "")) if isinstance(data, dict) else "", "")
+        on_done(str(data.get("path", "")) if isinstance(data, dict) else "", "", "")
     client.request("sites.save", args, done)
 
 

@@ -133,6 +133,34 @@ class AddSiteTests(unittest.TestCase):
         wait_for(lambda: page2.is_saved)
         self.assertEqual([c[1] for c in client2.calls if c[0] == "sites.save"][0].get("overwrite"), True)
 
+    def test_overwrite_asked_after_daemon_says_it_exists(self):
+        """sites.list traz o nome de exibição, não o do arquivo: o daemon é quem avisa (bad_request)."""
+        client, state, page, asked = make(saved={"pratica-1": "x"}, yes=True)
+        state.set_sites([])                                  # a UI não sabia que o arquivo existia
+        page.verify()
+        wait_for(lambda: page.result is not None)
+        page.name.setText("pratica-1")
+        page.save()
+        self.assertTrue(wait_for(lambda: page.is_saved))
+        sends = [c[1] for c in client.calls if c[0] == "sites.save"]
+        self.assertEqual(len(sends), 2)
+        self.assertNotIn("overwrite", sends[0])
+        self.assertEqual(sends[1].get("overwrite"), True)
+        self.assertEqual(len(asked), 1)
+
+    def test_overwrite_refused_after_daemon_says_it_exists(self):
+        client, state, page, asked = make(saved={"pratica-1": "x"}, yes=False)
+        state.set_sites([])
+        page.verify()
+        wait_for(lambda: page.result is not None)
+        page.name.setText("pratica-1")
+        page.save()
+        wait_for(lambda: len(asked) == 1)
+        wait_for(lambda: False, 0.1)
+        self.assertFalse(page.is_saved)
+        self.assertEqual(len([c for c in client.calls if c[0] == "sites.save"]), 1)
+        self.assertEqual(page.save_status.text(), "Nada foi salvo.")
+
     def test_name_validator_blocks_invalid_chars_and_limits(self):
         client, state, page, _ = make()
         page.verify()

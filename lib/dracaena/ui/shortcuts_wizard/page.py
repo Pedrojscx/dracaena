@@ -281,9 +281,9 @@ class ShortcutWizardPage(QWidget):
         return True
 
     # --- teste ---
-    # PROVISÓRIO: aguarda o Backend entregar no simulado (CONTRATO, 2ª rodada): ``shortcut.test {arm:true}``;
-    # o próximo toggle do compositor NÃO age e o daemon emite o evento ``shortcut_test {ok:true}``;
-    # desarma sozinho em 30 s. A UI só ouve ``event_received``; nunca manda toggle nem stop.
+    # CONTRATO: ``shortcut.test {arm:true}`` -> {armed:true}; o próximo toggle do compositor NÃO age e o
+    # daemon emite o evento ``shortcut_test {ok:true}``; desarma sozinho em 30 s. A UI só ouve
+    # ``event_received``; nunca manda toggle nem stop.
     def start_test(self) -> None:
         if not self._state.run.connected:
             self.test_status.setText(TXT_OFFLINE)

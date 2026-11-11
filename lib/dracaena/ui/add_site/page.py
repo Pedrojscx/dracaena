@@ -196,18 +196,31 @@ class AddSitePage(QWidget):
         name, toml = self.name.text(), self.draft.toPlainText()
         if not self.btn_save.isEnabled():
             return
+        # ``name`` de sites.list é o nome de exibição do perfil, não o do arquivo: serve só de aviso prévio.
         existing = {str(s.get("name")) for s in self._state.sites if isinstance(s, dict)}
-        overwrite = False
-        if name in existing:
-            if not self._confirm(self, f"Já existe um site chamado “{name}”. Sobrescrever?"):
-                self.save_status.setText("Nada foi salvo.")
-                return
-            overwrite = True
-        self.btn_save.setEnabled(False)
-        api.sites_save(self._client, name, toml, overwrite, lambda path, err: self._on_saved(name, path, err))
+        if name in existing and not self._ask_overwrite(name):
+            return
+        self._send_save(name, toml, overwrite=name in existing)
 
-    def _on_saved(self, name: str, path: str, error: str) -> None:
+    def _ask_overwrite(self, name: str) -> bool:
+        if self._confirm(self, f"Já existe um site chamado “{name}”. Sobrescrever?"):
+            return True
+        self.save_status.setText("Nada foi salvo.")
+        return False
+
+    def _send_save(self, name: str, toml: str, overwrite: bool) -> None:
+        self.btn_save.setEnabled(False)
+        api.sites_save(self._client, name, toml, overwrite,
+                       lambda path, err, code: self._on_saved(name, toml, overwrite, path, err, code))
+
+    def _on_saved(self, name: str, toml: str, overwrite: bool, path: str, error: str, code: str = "") -> None:
         if error:
+            # PROVISÓRIO: aguarda CONTRATO — "nome já existe" e "TOML inválido" voltam ambos como bad_request;
+            # hoje só a mensagem do daemon ("... confirme a substituição (overwrite)") distingue os dois.
+            if not overwrite and code == "bad_request" and "overwrite" in error.lower():
+                if self._ask_overwrite(name):
+                    return self._send_save(name, toml, overwrite=True)
+                return self._refresh()
             self.save_status.setText(f"Não salvei o site: {error}")
             return self._refresh()
         self.is_saved = True

@@ -119,6 +119,10 @@ class SettingsAgainstSimulatedDaemon(unittest.TestCase):
         self.assertTrue(wait_for(lambda: win._form is not None))
         keys = set(win._form.fields)
         self.assertTrue({"MODEL", "CLAUDE_TIMEOUT", "BROWSER_BIN", "BROWSER_FALLBACK", "KEEP_DAYS"} <= keys)
+        from PySide6.QtWidgets import QLabel
+        texts = [l.text() for l in win._form.findChildren(QLabel)]
+        self.assertIn("Modelo", texts)                      # label em português vindo do schema real
+        self.assertNotIn("MODEL", texts)
         win._form.fields["CLAUDE_TIMEOUT"].set(60)
         win.save()
         self.assertTrue(wait_for(lambda: win.status.text() == "Configurações salvas."))
@@ -128,6 +132,32 @@ class SettingsAgainstSimulatedDaemon(unittest.TestCase):
         self.assertEqual(got[0].data["CLAUDE_TIMEOUT"], 60)
         win.grab().save(str(screenshot_dir() / "settings.png"))
         win.close()
+
+
+class LabelTests(unittest.TestCase):
+    def test_label_is_field_text_and_description_is_the_hint(self):
+        schema = [{"key": "KEEP_DAYS", "type": "integer", "default": 7, "min": 1, "max": 3650,
+                   "label": "Dias de retenção", "description": "Dias em que os registros são mantidos."}]
+        client, state, win = make({"config.schema": schema, "config.get": {"KEEP_DAYS": 7}})
+        win.show()
+        wait_for(lambda: win._form is not None)
+        from PySide6.QtWidgets import QLabel
+        texts = [l.text() for l in win._form.findChildren(QLabel)]
+        self.assertIn("Dias de retenção", texts)
+        self.assertIn("Dias em que os registros são mantidos.", texts)
+        self.assertNotIn("KEEP_DAYS", texts)
+        self.assertIn("Dias em que os registros são mantidos.", win._form.fields["KEEP_DAYS"].widget.toolTip())
+
+    def test_without_label_falls_back_to_description_then_key(self):
+        schema = [{"key": "A", "type": "string", "default": "", "description": "texto a"},
+                  {"key": "B", "type": "string", "default": ""}]
+        client, state, win = make({"config.schema": schema, "config.get": {}})
+        win.show()
+        wait_for(lambda: win._form is not None)
+        from PySide6.QtWidgets import QLabel
+        texts = [l.text() for l in win._form.findChildren(QLabel)]
+        self.assertIn("Texto a", texts)
+        self.assertIn("B", texts)
 
 
 class DaemonSelectionTests(unittest.TestCase):
