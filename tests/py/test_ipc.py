@@ -319,7 +319,7 @@ def subscribed(daemon, events):
     return conn
 
 
-class SitesSaveTests(unittest.TestCase):
+class SitesBase(unittest.TestCase):
     TOML = '[site]\nname = "Exemplo"\nversion = 1\n'
 
     def setUp(self):
@@ -335,6 +335,9 @@ class SitesSaveTests(unittest.TestCase):
         self.patch.stop()
         self.directory.cleanup()
 
+
+
+class SitesSaveTests(SitesBase):
     def test_simulated_returns_path_without_writing(self):
         response = ask(Daemon(Simulator(), simulate=True), "sites.save", {"name": "meu-site_1", "toml": self.TOML})
         self.assertTrue(response["ok"])
@@ -369,13 +372,13 @@ class SitesSaveTests(unittest.TestCase):
         if os.name != "nt":
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         again = ask(daemon, "sites.save", {"name": "demo", "toml": self.TOML.replace("1", "2")})
-        self.assertEqual((again["ok"], again["code"]), (False, "bad_request"))
+        self.assertEqual((again["ok"], again["code"]), (False, "exists"))
         self.assertIn("1", path.read_text())
         replaced = ask(daemon, "sites.save", {"name": "demo", "toml": self.TOML.replace("1", "2"), "overwrite": True})
         self.assertTrue(replaced["ok"])
         self.assertIn("2", path.read_text())
         self.assertEqual([p.name for p in path.parent.iterdir()], ["demo.toml"])
-        self.assertEqual(ask(daemon, "sites.list")["data"], [{"name": "Exemplo", "version": 2}])
+        self.assertEqual(ask(daemon, "sites.list")["data"], [{"name": "Exemplo", "slug": "demo", "valid": True}])
 
 
 class ProbeTests(unittest.TestCase):
@@ -663,3 +666,48 @@ class UnixPeerOwnerTests(unittest.TestCase):
                 ipc._verify_socket_owner(str(path))
             path.unlink()
             ipc._verify_socket_owner(str(path))  # ausente: deixa o connect() reportar
+
+
+class SitesExistsAndListTests(SitesBase):
+    def test_simulated_exists_without_overwrite(self):
+        daemon = Daemon(Simulator(), simulate=True)
+        response = ask(daemon, "sites.save", {"name": "existente", "toml": self.TOML})
+        self.assertEqual((response["ok"], response["code"]), (False, "exists"))
+        self.assertIn("Já existe", response["error"])
+        self.assertTrue(ask(daemon, "sites.save", {"name": "existente", "toml": self.TOML, "overwrite": True})["ok"])
+        self.assertTrue(ask(daemon, "sites.save", {"name": "novo", "toml": self.TOML})["ok"])
+
+    def test_simulated_list_has_valid_and_invalid_sites(self):
+        sites = ask(Daemon(Simulator(), simulate=True), "sites.list")["data"]
+        self.assertTrue(any(s["valid"] for s in sites))
+        self.assertTrue(any(not s["valid"] for s in sites))
+        for site in sites:
+            self.assertEqual(set(site), {"name", "slug", "valid"})
+
+    def test_real_list_never_fails_on_bad_files(self):
+        directory = self.config / "sites"
+        directory.mkdir(parents=True)
+        (directory / "bom.toml").write_text('[site]\nname = "Nome Bonito"\n', encoding="utf-8")
+        (directory / "sem-nome.toml").write_text("x = 1\n", encoding="utf-8")
+        (directory / "quebrado.toml").write_text("[site\n", encoding="utf-8")
+        (directory / "binario.toml").write_bytes(b"\xff\xfe\x00")
+        (directory / "Slug Ruim.toml").write_text('[site]\nname = "x"\n', encoding="utf-8")
+        (directory / "grande.toml").write_text("# " + "a" * 70000 + "\n", encoding="utf-8")
+        (directory / "pasta.toml").mkdir()
+        (directory / "nome-nao-str.toml").write_text("[site]\nname = 3\n", encoding="utf-8")
+        listed = {s["slug"]: s for s in ask(Daemon(Simulator()), "sites.list")["data"]}
+        self.assertEqual(listed["bom"], {"name": "Nome Bonito", "slug": "bom", "valid": True})
+        self.assertEqual(listed["sem-nome"], {"name": "sem-nome", "slug": "sem-nome", "valid": True})
+        self.assertEqual(listed["nome-nao-str"]["name"], "nome-nao-str")
+        for slug in ("quebrado", "binario", "Slug Ruim", "grande"):
+            self.assertFalse(listed[slug]["valid"], slug)
+            self.assertEqual(listed[slug]["name"], slug)
+        self.assertNotIn("pasta", listed)
+
+    def test_real_list_without_directory_is_empty(self):
+        self.assertEqual(ask(Daemon(Simulator()), "sites.list")["data"], [])
+
+    def test_real_exists_code(self):
+        daemon = Daemon(Simulator())
+        self.assertTrue(ask(daemon, "sites.save", {"name": "demo", "toml": self.TOML})["ok"])
+        self.assertEqual(ask(daemon, "sites.save", {"name": "demo", "toml": self.TOML})["code"], "exists")

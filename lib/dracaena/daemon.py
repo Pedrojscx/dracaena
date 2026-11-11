@@ -10,6 +10,11 @@ COMMANDS = ("hello", "subscribe", "status", "toggle", "stop", "ask", "once", "co
             "config.set", "config.schema", "sites.list", "sites.save", "probe.start", "probe.cancel",
             "doctor", "shortcut.test")
 SHORTCUT_TEST_SECONDS = 30
+# Sites do simulador: "existente" provoca o código exists; "invalido" aparece com valid=false.
+SIMULATED_SITES = (
+    {"name": "Prática simulada", "slug": "existente", "valid": True},
+    {"name": "invalido", "slug": "invalido", "valid": False},
+)
 
 
 class ProbeError(Exception):
@@ -229,13 +234,14 @@ class Daemon:
             return run()
         if cmd == "sites.list":
             if self.simulate:
-                return [{"name": "Prática simulada", "version": 0, "simulated": True}]
+                return [dict(SIMULATED_SITES[0]), dict(SIMULATED_SITES[1])]
             from .platform.sites import list_sites
             return list_sites()
         if cmd == "sites.save":
             from .platform.sites import save
             # Simulado: valida e responde o caminho, sem gravar nada.
-            return save(args.get("name"), args.get("toml"), args.get("overwrite", False), write=not self.simulate)
+            return save(args.get("name"), args.get("toml"), args.get("overwrite", False), write=not self.simulate,
+                        existing=[site["slug"] for site in SIMULATED_SITES])
         raise ValueError("Comando de plataforma desconhecido")
 
     def dispatch(self, request, conn):
@@ -280,7 +286,7 @@ class Daemon:
             return dict(id=ident, ok=False, error=str(exc), code=exc.code)
         except Exception as exc:
             code = getattr(exc, "code", "internal")
-            allowed = ("bad_request", "unknown_cmd", "bad_state", "no_browser", "no_site", "refused", "cancelled")
+            allowed = ("bad_request", "unknown_cmd", "bad_state", "no_browser", "no_site", "refused", "cancelled", "exists")
             if code not in allowed:
                 LOG.exception("Falha interna ao executar %s", cmd)
             return dict(id=ident, ok=False, error=str(exc) if code in allowed else "Falha ao executar comando",

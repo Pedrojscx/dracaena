@@ -32,12 +32,17 @@ def validate(name, toml, overwrite=False):
 
 
 class SiteExists(Exception):
-    code = "bad_request"
+    code = "exists"
 
 
-def save(name, toml, overwrite=False, write=True):
-    """Grava sites/<name>.toml e devolve {"path"}; com write=False só valida (simulado)."""
+def save(name, toml, overwrite=False, write=True, existing=()):
+    """Grava sites/<name>.toml e devolve {"path"}; com write=False só valida (simulado).
+
+    `existing` (só no simulado) lista nomes que contam como já existentes.
+    """
     validate(name, toml, overwrite)
+    if not write and not overwrite and name in existing:
+        raise SiteExists("Já existe um site com esse nome; confirme a substituição (overwrite)")
     target = sites_dir() / (name + ".toml")
     if not write:
         return {"path": str(target)}
@@ -60,13 +65,30 @@ def save(name, toml, overwrite=False, write=True):
     return {"path": str(target)}
 
 
+def _describe(path):
+    """{name, slug, valid} de um arquivo; nunca levanta: ilegível/inválido => valid=False."""
+    slug = path.stem
+    info = dict(name=slug, slug=slug, valid=False)
+    if not NAME.fullmatch(slug):
+        return info
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(MAX_TOML_BYTES + 1)
+        if len(raw) > MAX_TOML_BYTES:
+            return info
+        data = tomllib.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        return info
+    display = data.get("site", {}).get("name") if isinstance(data.get("site"), dict) else None
+    if isinstance(display, str) and display.strip():
+        info["name"] = display
+    info["valid"] = True  # TODO: trocar pelo validador de perfil do B1 (adapters/profile.py)
+    return info
+
+
 def list_sites():
-    sites = []
-    for path in sorted(sites_dir().glob("*.toml")):
-        try:
-            with path.open("rb") as stream:
-                site = tomllib.load(stream).get("site", {})
-        except (OSError, tomllib.TOMLDecodeError):
-            continue
-        sites.append({"name": site.get("name", path.stem), "version": site.get("version", 0)})
-    return sites
+    try:
+        paths = sorted(p for p in sites_dir().glob("*.toml") if p.is_file())
+    except OSError:
+        return []
+    return [_describe(path) for path in paths]
