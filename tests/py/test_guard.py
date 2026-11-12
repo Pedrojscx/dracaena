@@ -247,15 +247,19 @@ class InvariantTests(GuardCase):
 class SourceTests(unittest.TestCase):
     def test_only_guard_acts_on_the_page(self):
         """Nenhum módulo além de guard.py chama métodos de ação do Playwright."""
-        pattern = re.compile(r"(?<!guard)\.(click|dblclick|check|uncheck|set_checked|select_option|drag_to|tap|press|"
-                             r"press_sequentially|type|fill|dispatch_event|hover|focus|set_input_files)\(|\.mouse\.|\.keyboard\.")
+        pattern = re.compile(r"\.(click|dblclick|check|uncheck|set_checked|select_option|drag_to|tap|press|"
+                             r"press_sequentially|type|fill|dispatch_event|dispatchEvent|requestSubmit|submit|hover|focus|set_input_files)\s*\(|\.(?:checked|selectedIndex|value)\s*=(?!=)|\.mouse\.|\.keyboard\.")
+        # O legado mantém a auditoria anterior até sua remoção coordenada.
+        legacy_pattern = re.compile(r"(?<!guard)\.(click|dblclick|check|uncheck|set_checked|select_option|drag_to|tap|press|"
+                                    r"press_sequentially|type|fill|dispatch_event|hover|focus|set_input_files)\(|\.mouse\.|\.keyboard\.")
         offenders = []
         for pkg in (REPO / "lib" / "dracaena", REPO / "lib" / "quizhelper"):
             for path in sorted(pkg.rglob("*.py")):
-                if path.name == "guard.py":
+                legacy = pkg.name == "quizhelper"
+                if (legacy and path.name == "guard.py") or path == REPO / "lib" / "dracaena" / "guard.py":
                     continue
                 for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                    if pattern.search(line):
+                    if (legacy_pattern if legacy else pattern).search(line):
                         offenders.append(f"{path.relative_to(REPO)}:{n}: {line.strip()}")
         self.assertEqual(offenders, [])
         guard_src = (REPO / "lib" / "dracaena" / "guard.py").read_text(encoding="utf-8")

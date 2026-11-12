@@ -16,6 +16,7 @@ from pathlib import Path
 
 E = html.escape
 CSS = """<style>
+[hidden]{display:none!important}
 body{font:16px sans-serif;margin:24px} .q{border:1px solid #888;margin:0 0 24px;padding:12px}
 label,button,[role=radio],[role=checkbox],[role=option],[role=button]{display:block;margin:6px 0;padding:6px;cursor:pointer}
 [role=radio],[role=checkbox],[role=option]{border:1px solid #aaa} [aria-checked=true],[aria-selected=true]{background:#cfc}
