@@ -42,9 +42,17 @@ const HU = {
               /feedback|result|correct|incorrect|explanation/i.test(String(e.className || '') + ' ' + (e.id || '')); },
   flat(s) { return QH.fold(s).replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim(); },
   btnLabel(e) { return HU.flat(QH.text(e) || e.getAttribute('aria-label') || e.value || e.getAttribute('title') || ''); },
-  SUBMIT: /^(submit|check|verify|send|answer|enviar|responder|verificar|conferir|checar|corrigir)( (my|your|the|a|sua|minha))?( (answer|response|resposta))?$/,
+  SUBMIT: /^(submit|check|verify|send|answer|enviar|responder|verificar|conferir|checar|corrigir|confirmar)( (my|your|the|a|sua|minha))?( (answer|response|resposta))?$/,
   RESET: /^(reset|try again|retry|clear|start over|tentar novamente|refazer|limpar|reiniciar)( (answer|answers|resposta|respostas))?$/,
   buttons(u, re) { return QH.all(u, e => HU.isBtn(e) && re.test(HU.btnLabel(e))); },
+  selectOwner(e) {
+    const explicit = HU.owner(e); if (explicit) return explicit;
+    // Sem fieldset, agrupa somente numa região semântica com um envio local.
+    return QH.chain(e).slice(1).find(c => ['ARTICLE', 'SECTION'].includes(c.tagName)
+      && HU.buttons(c, HU.SUBMIT).filter(b => QH.visible(b)).length === 1
+      && !QH.all(c, n => HU.rc(n) || ['radio', 'checkbox', 'option'].includes(HU.role(n))).length
+      && QH.all(c, n => n.tagName === 'SELECT' && QH.visible(n)).every(n => !HU.owner(n))) || null;
+  },
   // ---- átomos: grupos de alternativas ou de selects, na ordem de aparição
   atoms(root) {
     const cand = QH.all(root, e => (HU.rc(e) && HU.rcVisible(e)) ||
@@ -53,7 +61,7 @@ const HU = {
     const map = new Map();
     for (const e of cand) {
       let kind, key; const own = HU.owner(e);
-      if (e.tagName === 'SELECT') { kind = 'DROPDOWN'; key = 's' + HU.id(own || e); }
+      if (e.tagName === 'SELECT') { kind = 'DROPDOWN'; key = 's' + HU.id(HU.selectOwner(e) || e); }
       else {
         const t = HU.rc(e) || HU.role(e);
         if (t === 'option') { kind = own && own.getAttribute('aria-multiselectable') === 'true' ? 'MULTI' : 'SINGLE'; key = 'o' + HU.id(own || QH.parent(e)); }
