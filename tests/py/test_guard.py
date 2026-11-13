@@ -129,6 +129,12 @@ class InvariantTests(GuardCase):
                 self.assert_refused(Target("submit", "click", btn, label, "r1"))
                 self.assert_refused(Target("reset", "click", btn, label, "r1"))
 
+    def test_final_attempt_button_is_refused(self):
+        self.open("radio.html")
+        label = "Finalizar tentativa ..."
+        btn = self.inject(f'<button type="submit">{label}</button>')
+        self.assert_refused(Target("submit", "click", btn, label, "r1"))
+
     def test_aria_label_cannot_hide_a_global_submit(self):
         self.open("radio.html")
         btn = self.inject('<button type="button" aria-label="Submit all answers">OK</button>')

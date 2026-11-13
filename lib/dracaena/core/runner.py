@@ -46,6 +46,7 @@ def run(port: int, url_contains: str, *, dry_run: bool = True, max_questions: in
             log(f"aba escolhida: {page.url}")
             adapter = HeuristicAdapter()
             done = 0
+            previous_id = None
             while done < max_questions:
                 if Guard(log, dry_run=dry_run).result_visible(page.main_frame):
                     log("parada: fim da atividade")
@@ -57,6 +58,9 @@ def run(port: int, url_contains: str, *, dry_run: bool = True, max_questions: in
                     return 0
                 host = hosts[0]
                 question = adapter.extract(host)
+                if question.id == previous_id:
+                    log("parada: sem avanço (a navegação entre questões é do humano)")
+                    return 0
                 log(f"tipo da questão: {question.kind}")
                 try:
                     prompt = claude.prompt("answer", contract.question_text(question))
@@ -78,6 +82,7 @@ def run(port: int, url_contains: str, *, dry_run: bool = True, max_questions: in
                     log(f"parada: guarda recusou ({exc.reason})")
                     return 1
                 done += 1
+                previous_id = question.id
             log("parada: limite de questões")
             return 0
         finally:

@@ -46,6 +46,23 @@ class RunnerTests(BrowserCase):
         finally:
             page.close()
 
+    def test_repeated_question_stops_after_one_dry_run_action(self):
+        page = self.browser.new_page()
+        try:
+            page.goto(self.serve("quiz_mcq_single.html"))
+            logs = []
+            class PW:
+                chromium = type("Chromium", (), {"connect_over_cdp": lambda _, __: type("B", (), {"contexts": self.browser.contexts, "close": lambda _: None})()})()
+                def __enter__(_): return _
+                def __exit__(_, *a): return None
+            answer = lambda *_a, **_k: ('{"type":"SINGLE","answers":[0]}', 0.0)
+            self.assertEqual(runner.run(1, "quiz_mcq_single.html", max_questions=3, ask=answer,
+                                        log=logs.append, playwright_factory=lambda: PW()), 0)
+            self.assertEqual(sum("(dry-run) faria:" in line for line in logs), 1)
+            self.assertIn("parada: sem avanço (a navegação entre questões é do humano)", logs)
+        finally:
+            page.close()
+
     def test_unsupported_exits_cleanly(self):
         page = self.browser.new_page()
         try:

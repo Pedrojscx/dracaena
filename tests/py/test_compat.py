@@ -92,3 +92,8 @@ class CompatibilityTests(BrowserCase):
                 before = self.page.content()
                 self.assertEqual(self.adapter.locate(self.page.main_frame), [])
                 self.assertEqual(self.page.content(), before)
+
+    def test_quiz_result_is_only_a_result_screen(self):
+        self.fixture('quiz_result.html')
+        self.assertEqual(self.adapter.locate(self.page.main_frame), [])
+        self.assertTrue(Guard(lambda _: None).result_visible(self.page.main_frame))
