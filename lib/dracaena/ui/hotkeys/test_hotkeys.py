@@ -1,4 +1,5 @@
 """Integração X11 isolada em Xvfb, sem capturar o teclado da sessão real."""
+import importlib.util
 import os
 import select
 import shutil
@@ -10,6 +11,7 @@ from dracaena.ui.hotkeys import GlobalHotkey
 
 
 @unittest.skipUnless(shutil.which('Xvfb'), 'Xvfb indisponível')
+@unittest.skipUnless(importlib.util.find_spec('Xlib'), 'python-xlib indisponível (dependência opcional do atalho X11)')
 class X11Tests(unittest.TestCase):
     def test_register_trigger_conflict_and_release(self):
         from Xlib import X, XK, display
