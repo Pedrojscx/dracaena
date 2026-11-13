@@ -16,7 +16,7 @@ class CompatibilityTests(BrowserCase):
     def fixture(self, name):
         self.page.set_content((REPO / 'tests/fixtures/compat' / name).read_text())
 
-    def test_semantic_region_groups_selects_and_keeps_disabled_submit(self):
+    def test_dropdown_is_recognized_but_dry_run_never_changes_the_dom(self):
         self.fixture('dropdown.html')
         hosts = self.adapter.locate(self.page.main_frame)
         self.assertEqual(len(hosts), 1)
@@ -79,8 +79,14 @@ class CompatibilityTests(BrowserCase):
         self.assertEqual(len(hosts), 2)
         self.assertEqual([len(self.adapter.extract(h).items) for h in hosts], [1, 1])
 
-    def test_untyped_buttons_and_text_kinds_propose_no_actions(self):
-        for name in ['mcq_single.html', 'fill_blank.html', 'essay.html']:
+    def test_mcq_single_is_explicitly_not_supported(self):
+        self.fixture('mcq_single.html')
+        before = self.page.content()
+        self.assertEqual(self.adapter.locate(self.page.main_frame), [])
+        self.assertEqual(self.page.content(), before)
+
+    def test_text_kinds_propose_no_actions(self):
+        for name in ['fill_blank.html', 'essay.html']:
             with self.subTest(name=name):
                 self.fixture(name)
                 before = self.page.content()
