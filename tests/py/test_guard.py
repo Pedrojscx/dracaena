@@ -129,6 +129,23 @@ class InvariantTests(GuardCase):
                 self.assert_refused(Target("submit", "click", btn, label, "r1"))
                 self.assert_refused(Target("reset", "click", btn, label, "r1"))
 
+    def test_final_attempt_button_is_refused(self):
+        self.open("radio.html")
+        label = "Finalizar tentativa ..."
+        btn = self.inject(f'<button type="submit">{label}</button>')
+        self.assert_refused(Target("submit", "click", btn, label, "r1"), "texto bloqueado (finalizar)")
+
+    def test_final_submission_and_confirmation_are_refused_for_their_reason(self):
+        self.open("radio.html")
+        label = "Enviar tudo e terminar"
+        btn = self.inject(f'<button type="submit">{label}</button>')
+        self.assert_refused(Target("submit", "click", btn, label, "r1"), "texto bloqueado (enviar tudo)")
+        dialog = self.page.evaluate_handle(f"""() => {{ const d = document.createElement('dialog'); d.open = true;
+            d.innerHTML = '<button type=\"submit\">{label}</button>'; document.body.appendChild(d); return d; }}""").as_element()
+        self.assertIsNotNone(dialog)
+        confirmation = dialog.query_selector("button")
+        self.assert_refused(Target("submit", "click", confirmation, label, "r1"), "fora da questão atual")
+
     def test_aria_label_cannot_hide_a_global_submit(self):
         self.open("radio.html")
         btn = self.inject('<button type="button" aria-label="Submit all answers">OK</button>')
@@ -230,6 +247,23 @@ class InvariantTests(GuardCase):
             self.guard.perform(target, "Dog")
         self.assertEqual(self.clicks(), [])
         self.assertTrue(self.guard.result_visible())
+
+    def test_result_variants_stop_only_when_question_is_hidden(self):
+        variants = ("Revisão da atividade", "Revisão da tentativa", "Resumo da tentativa",
+                    "Attempt summary", "Attempt review")
+        for text in variants:
+            with self.subTest(text=text):
+                self.open("radio.html")
+                target = self.t("option", "#r1 input[value='1']")
+                self.page.evaluate("([text]) => { document.querySelector('#r1').style.display = 'none';"
+                                   " const h = document.createElement('h2'); h.textContent = text; document.body.appendChild(h); }", [text])
+                with self.assertRaises(ResultScreen):
+                    self.guard.perform(target, "teste")
+                self.assertEqual(self.clicks(), [])
+        self.open("radio.html")
+        self.inject('<span>Revisão da tentativa</span>')
+        self.guard.perform(self.t("option", "#r1 input[value='1']"))
+        self.assertTrue(self.el("#r1 input[value='1']").is_checked())
 
     def test_result_page_is_detected_and_question_page_is_not(self):
         self.page.goto(self.server.url("result.html"))
