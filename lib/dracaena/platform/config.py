@@ -19,6 +19,7 @@ FIELDS = {
     "KEEP_DAYS": dict(label="Dias de retenção", description="Dias em que registros e respostas locais são mantidos antes da limpeza.", min=1, max=3650),
     "CLICK_SUBMIT": dict(label="Enviar a prática automaticamente", description="1 clica no botão de envio da prática depois de marcar a resposta; 0 apenas marca.", min=0, max=1),
     "RETRY_ON_INCORRECT": dict(label="Tentar de novo se incorreta", description="1 tenta outra vez quando a prática indicar resposta incorreta; 0 segue adiante.", min=0, max=1),
+    "DRY_RUN": dict(label="Modo simulação", description="Modo simulação: valida e registra sem clicar na página."),
 }
 assert set(FIELDS) == set(DEFAULTS), "FIELDS e default.json devem ter as mesmas chaves"
 RANGES = {key: (field["min"], field["max"]) for key, field in FIELDS.items() if "min" in field}
@@ -28,7 +29,8 @@ def schema():
     result = []
     for key, default in DEFAULTS.items():
         field = FIELDS[key]
-        entry = dict(key=key, type="integer" if type(default) is int else "string", default=default,
+        kind = "boolean" if type(default) is bool else "integer" if type(default) is int else "string"
+        entry = dict(key=key, type=kind, default=default,
                      label=field["label"], description=field["description"])
         for extra in ("min", "max", "choices"):
             if extra in field:
@@ -83,7 +85,12 @@ def load():
             key, value = key.strip(), value.strip().strip("\"'")
             if key not in DEFAULTS:
                 continue
-            if type(DEFAULTS[key]) is int:
+            if type(DEFAULTS[key]) is bool:
+                flags = {"1": True, "true": True, "sim": True, "0": False, "false": False, "nao": False, "não": False}
+                if value.lower() not in flags:
+                    raise ValueError(f"Valor inválido para {key} na configuração antiga") from None
+                value = flags[value.lower()]
+            elif type(DEFAULTS[key]) is int:
                 try:
                     value = int(value)
                 except ValueError:
