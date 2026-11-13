@@ -1,11 +1,20 @@
 #!/bin/sh
 set -eu
-HERE=$(dirname "$(readlink -f "$0")")
+case "$0" in
+    */*) RUN_DIR=${0%/*} ;;
+    *) RUN_DIR=. ;;
+esac
+HERE=$(CDPATH= cd -P -- "$RUN_DIR" && pwd -P)
 export APPDIR="$HERE"
 # O runtime fornece o arquivo original, inclusive em extract-and-run.
 # Nunca substitua APPIMAGE por APPDIR ou pelo executável congelado.
 if [ -n "${APPIMAGE:-}" ]; then
-    APPIMAGE=$(readlink -f "$APPIMAGE")
+    case "$APPIMAGE" in
+        */*) IMAGE_DIR=${APPIMAGE%/*} ;;
+        *) IMAGE_DIR=. ;;
+    esac
+    IMAGE_NAME=${APPIMAGE##*/}
+    APPIMAGE="$(CDPATH= cd -P -- "${IMAGE_DIR:-/}" && pwd -P)/$IMAGE_NAME"
     export APPIMAGE
 fi
 exec "$HERE/usr/bin/dracaena" "$@"

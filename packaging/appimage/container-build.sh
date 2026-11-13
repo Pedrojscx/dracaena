@@ -29,8 +29,7 @@ PY="$WORK/python/bin/python3.12"
 "$PY" -c 'import sys; assert sys.version_info[:3] == (3, 12, 8)'
 # Dependências de execução desta fase; o navegador reserva é opcional e fica fora.
 "$PY" -m pip install --index-url https://pypi.org/simple --disable-pip-version-check \
-  pyinstaller==6.22.3 pyinstaller-hooks-contrib==2026.10 \
-  setuptools==80.9.0 packaging==25.0 altgraph==0.17.4 platformdirs==4.3.8 psutil==7.0.0 >&2
+  --require-hashes --only-binary=:all: -r "$ROOT/packaging/appimage/requirements-build.txt" >&2
 "$PY" -c 'import PyInstaller; assert PyInstaller.__version__ == "6.22.3"'
 fetch https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage \
   "$WORK/appimagetool" ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
