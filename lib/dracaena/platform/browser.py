@@ -1,5 +1,6 @@
 """Chromium discovery and dedicated-profile CDP launch."""
 import configparser
+import contextlib
 import ipaddress
 import json
 import os
@@ -18,6 +19,18 @@ class BrowserError(RuntimeError):
 
 class BrowserUnsupported(BrowserError):
     pass
+
+
+class NoBrowser(BrowserError):
+    """Nenhum navegador configurado nem detectado (único caso em que o fallback é permitido)."""
+
+
+class FallbackMissing(BrowserError):
+    """O Chromium reserva ainda não foi baixado; precisa de confirmação explícita do usuário."""
+
+
+BROWSERS_KEY = "PLAYWRIGHT_BROWSERS_PATH"
+FALLBACK_SIZE = "400 MB"  # espaço em disco do Chromium (sem o headless shell)
 
 
 def is_chromium(executable):
@@ -82,13 +95,78 @@ def resolve(executable="", fallback="playwright"):
             return candidate
         raise BrowserError("Navegador padrão detectado não é Chromium; configure um navegador compatível")
     if fallback == "playwright":
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as pw:
-            candidate = pw.chromium.executable_path
-        if Path(candidate).is_file():
-            return candidate
-        raise BrowserError("Fallback indisponível: execute `playwright install chromium`")
-    raise BrowserError("Nenhum navegador Chromium configurado ou detectado")
+        path = fallback_executable()
+        if path:
+            return path
+        raise FallbackMissing(f"O Chromium reserva ainda não foi baixado (ocupa cerca de {FALLBACK_SIZE} em disco)")
+    raise NoBrowser("Nenhum navegador Chromium configurado ou detectado")
+
+
+def fallback_dir():
+    """Pasta própria (por usuário) do Chromium reserva; nunca a do instalador do sistema."""
+    return data_dir() / "browsers"
+
+
+@contextlib.contextmanager
+def _browsers_env():
+    old = os.environ.get(BROWSERS_KEY)
+    os.environ[BROWSERS_KEY] = str(fallback_dir())
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop(BROWSERS_KEY, None)
+        else:
+            os.environ[BROWSERS_KEY] = old
+
+
+def fallback_executable():
+    """Caminho do Chromium reserva já baixado, ou None."""
+    from playwright.sync_api import sync_playwright
+    with _browsers_env(), sync_playwright() as pw:
+        candidate = pw.chromium.executable_path
+    return candidate if Path(candidate).is_file() else None
+
+
+def _explain(output, target):
+    text = output.lower()
+    if any(mark in text for mark in ("enotfound", "eai_again", "econnrefused", "econnreset", "etimedout",
+                                     "getaddrinfo", "socket hang up", "download failed", "network")):
+        return "Sem conexão com a internet para baixar o Chromium. Conecte-se e tente de novo."
+    if any(mark in text for mark in ("eacces", "eperm", "permission denied")):
+        return f"Sem permissão para gravar em {target}. Ajuste as permissões da pasta e tente de novo."
+    if "enospc" in text or "no space" in text:
+        return f"Sem espaço em disco em {target} (são necessários cerca de {FALLBACK_SIZE})."
+    return "Falha ao baixar o Chromium. Tente de novo ou informe um navegador nas configurações."
+
+
+def install_fallback(timeout=900):
+    """Baixa o Chromium com o driver embutido do Playwright para fallback_dir().
+
+    Só deve ser chamado após confirmação explícita do usuário (a CLI pergunta).
+    """
+    from playwright._impl._driver import compute_driver_executable, get_driver_env
+    target = fallback_dir()
+    try:
+        private_dir(target)
+    except OSError:
+        raise BrowserError(f"Sem permissão para gravar em {target}. Ajuste as permissões da pasta e tente de novo.") from None
+    node, cli = compute_driver_executable()
+    env = get_driver_env()
+    env[BROWSERS_KEY] = str(target)
+    try:
+        result = subprocess.run([node, cli, "install", "chromium", "--no-shell", "--no-progress"], env=env, capture_output=True, text=True,
+                                timeout=timeout, stdin=subprocess.DEVNULL)
+    except FileNotFoundError:
+        raise BrowserError("O instalador do Playwright não foi encontrado nesta instalação") from None
+    except subprocess.TimeoutExpired:
+        raise BrowserError("Tempo esgotado ao baixar o Chromium. Verifique a conexão e tente de novo.") from None
+    if result.returncode != 0:
+        raise BrowserError(_explain(result.stdout + result.stderr, target))
+    path = fallback_executable()
+    if not path:
+        raise BrowserError("O download terminou, mas o Chromium não foi encontrado")
+    return path
 
 
 def read_port(profile):

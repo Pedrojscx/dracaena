@@ -41,7 +41,8 @@ BLOCK_PHRASES = ("submit page", "submit my", "submit all", "submit quiz", "submi
 # Frases de tela de resultado (sem a questão visível, o laço encerra sem clicar).
 RESULT_PHRASES = ("quiz complete", "assessment complete", "exam complete", "activity complete",
                   "your score", "you scored", "your result", "results", "resultado", "pontuacao",
-                  "atividade concluida")
+                  "atividade concluida", "revisao da atividade", "revisao da tentativa", "resumo da tentativa",
+                  "attempt summary", "attempt review")
 
 ROLES = ("option", "submit", "reset")
 ACTIONS = ("click", "select")
