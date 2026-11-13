@@ -130,5 +130,155 @@ class PlatformTests(unittest.TestCase):
                 browser.resolve()
 
 
+class FallbackDownloadTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.data = Path(self.directory.name) / "data"
+        self.patch = patch.object(browser, "data_dir", return_value=self.data)
+        self.patch.start()
+
+    def tearDown(self):
+        self.patch.stop()
+        self.directory.cleanup()
+
+    def fake_playwright(self, executable, seen=None):
+        from unittest.mock import MagicMock
+        context = MagicMock()
+        def path_property():
+            if seen is not None:
+                seen.append(os.environ.get(browser.BROWSERS_KEY))
+            return executable
+        type(context.__enter__.return_value.chromium).executable_path = property(lambda self: path_property())
+        return patch("playwright.sync_api.sync_playwright", return_value=context)
+
+    def test_missing_fallback_is_a_distinct_error_and_uses_our_directory(self):
+        seen = []
+        before = os.environ.get(browser.BROWSERS_KEY)
+        with patch.object(browser, "default_browser", side_effect=browser.BrowserError("ausente")), \
+                self.fake_playwright(str(self.data / "nao-existe"), seen):
+            with self.assertRaisesRegex(browser.FallbackMissing, "ainda não foi baixado"):
+                browser.resolve()
+        self.assertEqual(seen, [str(self.data / "browsers")])
+        self.assertEqual(os.environ.get(browser.BROWSERS_KEY), before)
+
+    def test_no_browser_error_type_when_fallback_disabled(self):
+        with patch.object(browser, "default_browser", side_effect=browser.BrowserError("ausente")):
+            with self.assertRaises(browser.NoBrowser):
+                browser.resolve("", "")
+
+    def test_install_runs_embedded_driver_into_private_directory(self):
+        calls = []
+        def fake_run(command, **kwargs):
+            calls.append((command, kwargs))
+            from types import SimpleNamespace
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch.object(browser.subprocess, "run", fake_run), patch.object(browser, "fallback_executable", return_value="/x/chrome"):
+            self.assertEqual(browser.install_fallback(), "/x/chrome")
+        command, kwargs = calls[0]
+        self.assertEqual(command[2:], ["install", "chromium", "--no-shell", "--no-progress"])
+        self.assertTrue(command[1].endswith("cli.js"))
+        self.assertEqual(kwargs["env"][browser.BROWSERS_KEY], str(self.data / "browsers"))
+        if os.name != "nt":
+            self.assertEqual((self.data / "browsers").stat().st_mode & 0o777, 0o700)
+
+    def test_download_failures_are_explained_in_portuguese(self):
+        from types import SimpleNamespace
+        cases = {"getaddrinfo ENOTFOUND cdn.playwright.dev": "Sem conexão",
+                 "Error: EACCES: permission denied, mkdir": "Sem permissão",
+                 "ENOSPC: no space left on device": "Sem espaço",
+                 "algo estranho": "Falha ao baixar"}
+        for output, expected in cases.items():
+            with self.subTest(output=output), patch.object(browser.subprocess, "run",
+                    return_value=SimpleNamespace(returncode=1, stdout="", stderr=output)):
+                with self.assertRaisesRegex(browser.BrowserError, expected):
+                    browser.install_fallback()
+        with patch.object(browser.subprocess, "run", side_effect=browser.subprocess.TimeoutExpired("x", 1)):
+            with self.assertRaisesRegex(browser.BrowserError, "Tempo esgotado"):
+                browser.install_fallback()
+        with patch.object(browser.subprocess, "run", side_effect=FileNotFoundError()):
+            with self.assertRaisesRegex(browser.BrowserError, "instalador"):
+                browser.install_fallback()
+
+    def test_unwritable_directory_is_reported(self):
+        with patch.object(browser, "private_dir", side_effect=PermissionError()):
+            with self.assertRaisesRegex(browser.BrowserError, "Sem permissão"):
+                browser.install_fallback()
+
+    def test_doctor_never_downloads_and_shows_hint(self):
+        from dracaena.platform import doctor
+        with patch.object(browser, "resolve", side_effect=browser.FallbackMissing("O Chromium reserva ainda não foi baixado")), \
+                patch.object(browser, "install_fallback") as install:
+            checks = {c["name"]: c for c in doctor.run()["checks"]}
+        install.assert_not_called()
+        self.assertFalse(checks["browser"]["ok"])
+        self.assertIn("dracaena install-browser", checks["browser"]["hint"])
+
+
+class InstallBrowserCommandTests(unittest.TestCase):
+    def run_command(self, assume_yes=False, answer="n", interactive=True, cfg=None, resolve=None, existing=None):
+        import contextlib
+        import io
+        from dracaena import cli
+        cfg = {"BROWSER_BIN": "", "BROWSER_FALLBACK": "playwright", **(cfg or {})}
+        out, prompts = io.StringIO(), []
+        resolve = resolve or browser.NoBrowser("Nenhum navegador")
+        with patch("dracaena.platform.config.load", return_value=cfg), \
+                patch.object(browser, "resolve", side_effect=resolve if isinstance(resolve, Exception) else None,
+                             return_value=None if isinstance(resolve, Exception) else resolve), \
+                patch.object(browser, "fallback_executable", return_value=existing), \
+                patch.object(browser, "install_fallback", return_value="/dados/chrome") as install, \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = cli.install_browser(assume_yes, ask=lambda text: prompts.append(text) or answer, interactive=interactive)
+        return code, json.loads(out.getvalue()), install, prompts
+
+    def test_asks_and_downloads_only_after_explicit_yes(self):
+        code, result, install, prompts = self.run_command(answer="s")
+        self.assertEqual((code, result["ok"]), (0, True))
+        install.assert_called_once()
+        self.assertIn("400 MB", prompts[0])
+
+    def test_declined_or_noninteractive_does_not_download(self):
+        for kwargs in (dict(answer=""), dict(answer="n"), dict(interactive=False)):
+            code, result, install, _ = self.run_command(**kwargs)
+            self.assertEqual(code, 1)
+            install.assert_not_called()
+        self.assertIn("--yes", self.run_command(interactive=False)[1]["error"])
+
+    def test_yes_flag_skips_prompt(self):
+        code, result, install, prompts = self.run_command(assume_yes=True, interactive=False)
+        self.assertEqual(code, 0)
+        install.assert_called_once()
+        self.assertEqual(prompts, [])
+
+    def test_existing_or_configured_browser_has_priority(self):
+        code, result, install, _ = self.run_command(assume_yes=True, resolve="/usr/bin/chromium")
+        self.assertEqual(code, 0)
+        install.assert_not_called()
+        code, result, install, _ = self.run_command(assume_yes=True, resolve=browser.BrowserError("Navegador configurado não é Chromium válido"))
+        self.assertEqual(code, 1)
+        install.assert_not_called()
+
+    def test_disabled_fallback_and_already_installed(self):
+        code, result, install, _ = self.run_command(assume_yes=True, cfg={"BROWSER_FALLBACK": ""})
+        self.assertEqual(code, 1)
+        install.assert_not_called()
+        code, result, install, _ = self.run_command(assume_yes=True, existing="/dados/chrome")
+        self.assertEqual(code, 0)
+        install.assert_not_called()
+
+    def test_download_error_is_reported(self):
+        from dracaena import cli
+        import contextlib
+        import io
+        out = io.StringIO()
+        with patch("dracaena.platform.config.load", return_value={"BROWSER_BIN": "", "BROWSER_FALLBACK": "playwright"}), \
+                patch.object(browser, "resolve", side_effect=browser.NoBrowser("x")), \
+                patch.object(browser, "fallback_executable", return_value=None), \
+                patch.object(browser, "install_fallback", side_effect=browser.BrowserError("Sem conexão com a internet")), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.install_browser(True), 1)
+        self.assertIn("Sem conexão", json.loads(out.getvalue())["error"])
+
+
 if __name__ == "__main__":
     unittest.main()
