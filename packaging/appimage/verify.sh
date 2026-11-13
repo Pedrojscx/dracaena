@@ -3,6 +3,8 @@
 # sistema e sem o venv do projeto.
 #
 #   (a) host: env -i HOME=<temporário> PATH=/nonexistent (sem PYTHON*/VIRTUAL_ENV);
+#       TMPDIR=<temporário> também, porque o runtime não apaga o diretório
+#       do --appimage-extract-and-run;
 #       usa FUSE se houver (cai para --appimage-extract-and-run se falhar),
 #       senão --appimage-extract-and-run;
 #   (b) contêiner sem Python (ubuntu:22.04 puro; confere "command -v python3"
@@ -183,7 +185,7 @@ esac
 echo "modo: $HOST_MODE"
 echo "variáveis Python/venv no shell que chama (todas descartadas pelo env -i):"
 env | grep -E '^(PYTHON[A-Z_]*|VIRTUAL_ENV|CONDA_PREFIX|QH_PYTHON)=' | sed 's/^/  /' || echo "  (nenhuma)"
-echo "ambiente visto pelo processo testado: $(env -i HOME=/tmp/x PATH="$TEST_PATH" /usr/bin/env | tr '\n' ' ')"
+echo "ambiente visto pelo processo testado: $(env -i HOME=/tmp/x TMPDIR=/tmp/y PATH="$TEST_PATH" /usr/bin/env | tr '\n' ' ')"
 if [[ -n "$TOOLS" ]]; then
     echo "conteúdo do PATH: $(find "$TEST_PATH" -mindepth 1 -printf '%f '); python3 nele: [$(PATH="$TEST_PATH" command -v python3 || true)]"
     record INFO "PATH relaxado" "PATH só com: $TOOLS (critério estrito é /nonexistent)"
@@ -198,8 +200,9 @@ host_run() {  # nome modo args...
         capture "$name" env PROBE_HELLO=1 PROBE_PATH="$TEST_PATH" sh "$WORK/daemon-probe.sh" "$APP" "$mode"
         echo "sh daemon-probe.sh <app> $mode   # daemon --simulate + status" >"$WORK/$name.cmd"
     else
-        capture "$name" env -i HOME="$home" PATH="$TEST_PATH" "$APP" "${extra[@]}" "$@"
-        echo "env -i HOME=<tmp> PATH=$TEST_PATH <app> ${extra[*]} $*" >"$WORK/$name.cmd"
+        mkdir "$home/tmp"
+        capture "$name" env -i HOME="$home" TMPDIR="$home/tmp" PATH="$TEST_PATH" "$APP" "${extra[@]}" "$@"
+        echo "env -i HOME=<tmp> TMPDIR=<tmp> PATH=$TEST_PATH <app> ${extra[*]} $*" >"$WORK/$name.cmd"
     fi
 }
 
