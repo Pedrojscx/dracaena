@@ -6,6 +6,16 @@ import sys
 from .platform.ipc import request
 
 ALIASES = {"loop": "toggle", "probe": "probe.start"}
+__version__ = "0.1.0"  # usado só quando o pacote não está instalado; manter igual ao pyproject.toml
+
+
+def package_version():
+    """Versão do pacote instalado; sem instalação, cai para __version__."""
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version("dracaena")
+    except PackageNotFoundError:
+        return __version__
 
 
 def friendly(exc):
@@ -57,6 +67,8 @@ def install_browser(assume_yes, ask=input, interactive=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="dracaena", description="Controle do Dracaena.")
+    parser.add_argument("-V", "--version", action="version", version=f"dracaena {package_version()}",
+                        help="mostra a versão e sai")
     sub = parser.add_subparsers(dest="command", required=True, metavar="comando")
     daemon = sub.add_parser("daemon", help="inicia o servidor local")
     daemon.add_argument("--simulate", action="store_true", help="usa o simulador no lugar do núcleo")
