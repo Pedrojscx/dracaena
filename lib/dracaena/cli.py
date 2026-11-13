@@ -72,8 +72,18 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True, metavar="comando")
     daemon = sub.add_parser("daemon", help="inicia o servidor local")
     daemon.add_argument("--simulate", action="store_true", help="usa o simulador no lugar do núcleo")
-    for name in ("loop", "ask", "toggle", "stop", "status", "doctor", "probe", "once"):
-        sub.add_parser(name)
+    commands = {
+        "loop": "inicia ou pausa o laço de respostas (o mesmo que toggle)",
+        "ask": "consulta só a questão atual e mostra a resposta, sem clicar",
+        "toggle": "inicia ou pausa o laço de respostas",
+        "stop": "encerra o laço de respostas",
+        "status": "mostra o estado atual do daemon",
+        "doctor": "verifica Claude Code, navegador e demais dependências (local, sem daemon)",
+        "probe": "inicia a sondagem da página aberta para configurar um site",
+        "once": "processa uma única questão e para",
+    }
+    for name, text in commands.items():
+        sub.add_parser(name, help=text)
     install = sub.add_parser("install-browser", help="baixa o Chromium reserva (só se não houver navegador)")
     install.add_argument("--yes", action="store_true", help="confirma o download sem perguntar")
     args = parser.parse_args(argv)
