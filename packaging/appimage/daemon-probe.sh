@@ -1,6 +1,7 @@
 #!/bin/sh
 # daemon-probe.sh <app> <fuse|extract>: sobe "daemon --simulate" num ambiente
-# limpo (env -i, PATH=/nonexistent, HOME e XDG_RUNTIME_DIR temporários), espera
+# limpo (env -i, PATH=$PROBE_PATH ou /nonexistent, HOME e XDG_RUNTIME_DIR
+# temporários), espera
 # o socket IPC e consulta "status" com o próprio executável como cliente. Se
 # PROBE_HELLO=1 e houver python3 no ambiente que chama, também envia o pedido
 # IPC "hello" cru pelo socket (o Python aqui é só cliente externo; o daemon
@@ -9,6 +10,7 @@
 # Saída: 0 se o daemon respondeu ao status, 1 caso contrário.
 set -u
 app="$1"
+test_path="${PROBE_PATH:-/nonexistent}"
 flag=""
 [ "${2:-extract}" = extract ] && flag="--appimage-extract-and-run"
 
@@ -19,14 +21,14 @@ sock="$base/run/dracaena/ctl.sock"
 
 run_app() {
     # shellcheck disable=SC2086  # $flag vazio some de propósito
-    env -i HOME="$base/home" XDG_RUNTIME_DIR="$base/run" PATH=/nonexistent "$app" $flag "$@"
+    env -i HOME="$base/home" XDG_RUNTIME_DIR="$base/run" PATH="$test_path" "$app" $flag "$@"
 }
 
 # setsid: o daemon fica num grupo próprio e o grupo inteiro (runtime do
 # AppImage + processo extraído) é encerrado no fim.
 # shellcheck disable=SC2016  # expande no sh filho
-setsid sh -c 'exec env -i HOME="$1" XDG_RUNTIME_DIR="$2" PATH=/nonexistent "$3" ${4:+"$4"} daemon --simulate' \
-    sh "$base/home" "$base/run" "$app" "$flag" >"$base/daemon.log" 2>&1 &
+setsid sh -c 'exec env -i HOME="$1" XDG_RUNTIME_DIR="$2" PATH="$5" "$3" ${4:+"$4"} daemon --simulate' \
+    sh "$base/home" "$base/run" "$app" "$flag" "$test_path" >"$base/daemon.log" 2>&1 &
 pid=$!
 
 result=1
@@ -42,7 +44,7 @@ while [ "$waited" -lt 60 ]; do
     waited=$((waited + 1))
 done
 
-echo "comando:     env -i HOME=<tmp> XDG_RUNTIME_DIR=<tmp> PATH=/nonexistent <app> $flag daemon --simulate"
+echo "comando:     env -i HOME=<tmp> XDG_RUNTIME_DIR=<tmp> PATH=$test_path <app> $flag daemon --simulate"
 if [ -S "$sock" ]; then
     echo "socket:      criado em ~$((waited / 2))s ($(stat -c '%a' "$sock"))"
     out="$(run_app status 2>&1)"

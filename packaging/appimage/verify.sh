@@ -23,6 +23,9 @@
 #
 # Variáveis opcionais:
 #   VERIFY_VERSION=1            torna --version critério (exit 0, saída não vazia)
+#   VERIFY_PATH_TOOLS="readlink dirname"   relaxa PATH=/nonexistent para um
+#                               diretório só com essas ferramentas (confere que
+#                               não há python nele); o padrão é o critério estrito
 #   VERIFY_IMAGE=ubuntu:22.04   imagem do item (b)
 #   VERIFY_SKIP_CONTAINER=1     pula (b) e o registra como NÃO TESTADO
 #   VERIFY_HOST_MODE=auto|fuse|extract   modo do item (a) (padrão: auto)
@@ -48,6 +51,7 @@ TOP="${VERIFY_TOP:-15}"
 TIMEOUT="${VERIFY_TIMEOUT:-120}"
 HOST_MODE="${VERIFY_HOST_MODE:-auto}"
 VERSION_REQUIRED="${VERIFY_VERSION:-0}"
+TOOLS="${VERIFY_PATH_TOOLS:-}"
 SRC="$(readlink -f "$1")"
 SRC_DIR="$(dirname "$SRC")"
 
@@ -68,6 +72,18 @@ APP="$WORK/app.AppImage"
 cp "$SRC" "$APP"
 cp "$PROBE" "$WORK/daemon-probe.sh"
 chmod 0755 "$APP" "$WORK/daemon-probe.sh" "$WORK"
+
+# PATH dos processos testados: /nonexistent, ou um diretório só com $TOOLS.
+TEST_PATH=/nonexistent
+if [[ -n "$TOOLS" ]]; then
+    TEST_PATH="$WORK/shim"
+    mkdir "$TEST_PATH"
+    for t in $TOOLS; do
+        [[ "$t" == *python* ]] && { echo "verify.sh: VERIFY_PATH_TOOLS não pode conter python" >&2; exit 2; }
+        target="$(command -v "$t")" || { echo "verify.sh: ferramenta ausente no host: $t" >&2; exit 2; }
+        ln -s "$target" "$TEST_PATH/$t"
+    done
+fi
 
 # Marcas de erro de ambiente: Python ausente/quebrado ou biblioteca faltando.
 ERROR_RE='Traceback \(most recent call last\)|ModuleNotFoundError|ImportError|No module named|Failed to execute script|\[PYI-[0-9]+:ERROR\]|Failed to load Python shared library|error while loading shared libraries|cannot open shared object file|version `GLIBC_[0-9.]+'"'"' not found'
@@ -151,10 +167,11 @@ echo "caminho: $SRC"
 echo "tamanho: $SIZE bytes ($(numfmt --to=iec-i --suffix=B "$SIZE"))"
 echo "sha256:  $(sha256sum "$SRC" | cut -d' ' -f1)"
 command -v file >/dev/null && echo "tipo:    $(file -b "$SRC")"
+echo "PATH dos testes: $([[ -n "$TOOLS" ]] && echo "diretório só com: $TOOLS" || echo /nonexistent)"
 echo "--version como critério: $([[ "$VERSION_REQUIRED" == 1 ]] && echo sim || echo 'não (PENDENTE)')"
 
 # ---------------------------------------------------------------- (a) host
-section "(a) Host sem Python no ambiente (env -i, PATH=/nonexistent)"
+section "(a) Host sem Python no ambiente (env -i, PATH=$TEST_PATH)"
 fuse_usable() {
     [[ -r /dev/fuse && -w /dev/fuse ]] && { command -v fusermount3 || command -v fusermount; } >/dev/null 2>&1
 }
@@ -166,7 +183,11 @@ esac
 echo "modo: $HOST_MODE"
 echo "variáveis Python/venv no shell que chama (todas descartadas pelo env -i):"
 env | grep -E '^(PYTHON[A-Z_]*|VIRTUAL_ENV|CONDA_PREFIX|QH_PYTHON)=' | sed 's/^/  /' || echo "  (nenhuma)"
-echo "ambiente visto pelo processo testado: $(env -i HOME=/tmp/x PATH=/nonexistent /usr/bin/env | tr '\n' ' ')"
+echo "ambiente visto pelo processo testado: $(env -i HOME=/tmp/x PATH="$TEST_PATH" /usr/bin/env | tr '\n' ' ')"
+if [[ -n "$TOOLS" ]]; then
+    echo "conteúdo do PATH: $(find "$TEST_PATH" -mindepth 1 -printf '%f '); python3 nele: [$(PATH="$TEST_PATH" command -v python3 || true)]"
+    record INFO "PATH relaxado" "PATH só com: $TOOLS (critério estrito é /nonexistent)"
+fi
 
 host_run() {  # nome modo args...
     local name="$1" mode="$2"; shift 2
@@ -174,11 +195,11 @@ host_run() {  # nome modo args...
     home="$(mktemp -d "$WORK/home.XXXXXX")"
     [[ "$mode" == extract ]] && extra=(--appimage-extract-and-run)
     if [[ "$1" == daemon ]]; then
-        capture "$name" env PROBE_HELLO=1 sh "$WORK/daemon-probe.sh" "$APP" "$mode"
+        capture "$name" env PROBE_HELLO=1 PROBE_PATH="$TEST_PATH" sh "$WORK/daemon-probe.sh" "$APP" "$mode"
         echo "sh daemon-probe.sh <app> $mode   # daemon --simulate + status" >"$WORK/$name.cmd"
     else
-        capture "$name" env -i HOME="$home" PATH=/nonexistent "$APP" "${extra[@]}" "$@"
-        echo "env -i HOME=<tmp> PATH=/nonexistent <app> ${extra[*]} $*" >"$WORK/$name.cmd"
+        capture "$name" env -i HOME="$home" PATH="$TEST_PATH" "$APP" "${extra[@]}" "$@"
+        echo "env -i HOME=<tmp> PATH=$TEST_PATH <app> ${extra[*]} $*" >"$WORK/$name.cmd"
     fi
 }
 
@@ -188,7 +209,7 @@ for cmd in --help doctor daemon --version; do
     host_run "$name" "$mode" "$cmd"
     if [[ "$mode" == fuse && "$(cat "$WORK/$name.rc")" != 0 ]] \
         && grep -Eqi 'fuse|fusermount|squashfs|mount' "$WORK/$name.out"; then
-        echo "FUSE falhou com PATH=/nonexistent:"
+        echo "FUSE falhou com PATH=$TEST_PATH:"
         sed 's/^/  | /' "$WORK/$name.out"
         record INFO "host $cmd (FUSE)" "falhou ao montar; repetido com --appimage-extract-and-run"
         mode=extract
@@ -209,9 +230,14 @@ elif ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
 else
     docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
     echo "imagem: $IMAGE ($(docker image inspect -f '{{.Id}}' "$IMAGE"))"
-    DOCKER=(docker run --rm --network none --user "$(id -u):$(id -g)"
+    DOCKER=(docker run --rm --network none --user "$(id -u):$(id -g)" -e "VERIFY_PATH_TOOLS=$TOOLS"
             -v "$WORK/app.AppImage:/work/app.AppImage:ro"
             -v "$WORK/daemon-probe.sh:/work/daemon-probe.sh:ro" "$IMAGE")
+    # Mesmo PATH do host, montado dentro do contêiner com as ferramentas dele.
+    # shellcheck disable=SC2016  # expande dentro do contêiner
+    PREFIX='p=/nonexistent; if [ -n "$VERIFY_PATH_TOOLS" ]; then mkdir /tmp/shim; for t in $VERIFY_PATH_TOOLS; do c=$(command -v "$t") && ln -s "$c" /tmp/shim/"$t"; done; p=/tmp/shim; fi; '
+    SHOWN_PATH="${TOOLS:+<dir com: $TOOLS (as que existirem na imagem)>}"
+    SHOWN_PATH="${SHOWN_PATH:-/nonexistent}"
     SHOWN="docker run --rm --network none --user $(id -u):$(id -g) -v <app>:/work/app.AppImage:ro $IMAGE"
 
     # shellcheck disable=SC2016  # expande dentro do contêiner
@@ -228,14 +254,15 @@ else
     for cmd in --help doctor daemon --version; do
         name="ctr_${cmd#--}"
         if [[ "$cmd" == daemon ]]; then
-            capture "$name" "${DOCKER[@]}" sh /work/daemon-probe.sh /work/app.AppImage extract
-            show "$name" "$SHOWN sh /work/daemon-probe.sh /work/app.AppImage extract"
+            # shellcheck disable=SC2016  # expande dentro do contêiner
+            capture "$name" "${DOCKER[@]}" sh -c "$PREFIX"'PROBE_PATH="$p" exec sh /work/daemon-probe.sh /work/app.AppImage extract'
+            show "$name" "$SHOWN sh /work/daemon-probe.sh /work/app.AppImage extract   # PATH=$SHOWN_PATH"
         else
             # shellcheck disable=SC2016  # expande dentro do contêiner
             capture "$name" "${DOCKER[@]}" sh -c \
-                'h=$(mktemp -d); exec env -i HOME="$h" PATH=/nonexistent /work/app.AppImage --appimage-extract-and-run "$@"' \
+                "$PREFIX"'h=$(mktemp -d); exec env -i HOME="$h" PATH="$p" /work/app.AppImage --appimage-extract-and-run "$@"' \
                 sh "$cmd"
-            show "$name" "$SHOWN sh -c 'env -i HOME=\$(mktemp -d) PATH=/nonexistent /work/app.AppImage --appimage-extract-and-run $cmd'"
+            show "$name" "$SHOWN sh -c 'env -i HOME=\$(mktemp -d) PATH=$SHOWN_PATH /work/app.AppImage --appimage-extract-and-run $cmd'"
         fi
         judge "$name" "contêiner $cmd" "$(kind_of "$cmd")"
     done
