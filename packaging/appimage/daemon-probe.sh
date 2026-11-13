@@ -1,12 +1,17 @@
 #!/bin/sh
 # daemon-probe.sh <app> <fuse|extract>: sobe "daemon --simulate" num ambiente
-# limpo (env -i, PATH=$PROBE_PATH ou /nonexistent, HOME, TMPDIR e XDG_RUNTIME_DIR
-# temporários), espera
-# o socket IPC e consulta "status" com o próprio executável como cliente. Se
-# PROBE_HELLO=1 e houver python3 no ambiente que chama, também envia o pedido
-# IPC "hello" cru pelo socket (o Python aqui é só cliente externo; o daemon
-# testado continua sem acesso a ele). Usado pelo verify.sh no host e no
-# contêiner; POSIX sh para rodar no ubuntu:22.04 puro.
+# limpo (env -i, PATH=$PROBE_PATH ou /nonexistent, HOME, TMPDIR e
+# XDG_RUNTIME_DIR temporários), espera o socket IPC e consulta "status" com o
+# próprio executável como cliente. POSIX sh e sem Python, para rodar igual no
+# host e no ubuntu:22.04 puro.
+#
+#   PROBE_PATH=<dir>       PATH dos processos testados (padrão /nonexistent)
+#   PROBE_RUN_DIR=<dir>    XDG_RUNTIME_DIR a usar (padrão: temporário); o
+#                          verify.sh passa um diretório visível do host para
+#                          mandar o "hello" de fora, inclusive no contêiner
+#   PROBE_WAIT_FILE=<arq>  depois do status, mantém o daemon vivo até esse
+#                          arquivo existir (até 60 s)
+#
 # Saída: 0 se o daemon respondeu ao status, 1 caso contrário.
 set -u
 app="$1"
@@ -16,31 +21,28 @@ flag=""
 
 base="$(mktemp -d)"
 mkdir -p "$base/home" "$base/run" "$base/tmp"
-chmod 700 "$base/run"
-sock="$base/run/dracaena/ctl.sock"
+run="${PROBE_RUN_DIR:-$base/run}"
+chmod 700 "$run"
+sock="$run/dracaena/ctl.sock"
 
 run_app() {
     # shellcheck disable=SC2086  # $flag vazio some de propósito
-    env -i HOME="$base/home" TMPDIR="$base/tmp" XDG_RUNTIME_DIR="$base/run" PATH="$test_path" "$app" $flag "$@"
+    env -i HOME="$base/home" TMPDIR="$base/tmp" XDG_RUNTIME_DIR="$run" PATH="$test_path" "$app" $flag "$@"
 }
 
 # setsid: o daemon fica num grupo próprio e o grupo inteiro (runtime do
-# AppImage + processo extraído) é encerrado no fim.
+# AppImage + processo extraído) é encerrado no fim. TMPDIR próprio: o runtime
+# deixa o diretório do extract-and-run para trás.
 # shellcheck disable=SC2016  # expande no sh filho
-# TMPDIR próprio: o runtime deixa o diretório do extract-and-run para trás.
-setsid sh -c 'exec env -i HOME="$1" TMPDIR="$1/../tmp" XDG_RUNTIME_DIR="$2" PATH="$5" "$3" ${4:+"$4"} daemon --simulate' \
-    sh "$base/home" "$base/run" "$app" "$flag" "$test_path" >"$base/daemon.log" 2>&1 &
+setsid sh -c 'exec env -i HOME="$1/home" TMPDIR="$1/tmp" XDG_RUNTIME_DIR="$2" PATH="$5" "$3" ${4:+"$4"} daemon --simulate' \
+    sh "$base" "$run" "$app" "$flag" "$test_path" >"$base/daemon.log" 2>&1 &
 pid=$!
 
 result=1
 waited=0
 while [ "$waited" -lt 60 ]; do
-    if [ -S "$sock" ]; then
-        break
-    fi
-    if ! kill -0 "$pid" 2>/dev/null; then
-        break
-    fi
+    [ -S "$sock" ] && break
+    kill -0 "$pid" 2>/dev/null || break
     sleep 0.5
     waited=$((waited + 1))
 done
@@ -55,27 +57,9 @@ if [ -S "$sock" ]; then
     case "$out" in
         *'"ok": true'*) [ "$rc" = 0 ] && result=0 ;;
     esac
-    if [ "${PROBE_HELLO:-0}" = 1 ]; then
-        if command -v python3 >/dev/null 2>&1; then
-            hello="$(python3 -I -c '
-import socket, sys
-s = socket.socket(socket.AF_UNIX)
-s.settimeout(5)
-s.connect(sys.argv[1])
-s.sendall(b"{\"v\": 0, \"id\": 1, \"cmd\": \"hello\"}\n")
-buf = b""
-while not buf.endswith(b"\n"):
-    chunk = s.recv(65536)
-    if not chunk:
-        break
-    buf += chunk
-sys.stdout.write(buf.decode())
-' "$sock" 2>&1)"
-            echo "hello rc:    $?"
-            echo "hello out:   $hello"
-        else
-            echo "hello:       NÃO TESTADO (sem python3 como cliente externo)"
-        fi
+    if [ -n "${PROBE_WAIT_FILE:-}" ]; then
+        i=0
+        while [ ! -e "$PROBE_WAIT_FILE" ] && [ "$i" -lt 120 ]; do sleep 0.5; i=$((i + 1)); done
     fi
 else
     echo "socket:      não apareceu em 30s"

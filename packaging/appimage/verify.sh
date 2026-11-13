@@ -20,11 +20,17 @@
 #                           e relatório JSON com "checks"
 #   daemon --simulate       socket IPC criado e "status" (o próprio executável
 #                           como cliente) com exit 0 e "ok": true
-#   --version               PENDENTE: só vira critério com VERIFY_VERSION=1;
-#                           sem isso roda e registra o exit code, sem reprovar
+#   hello.toggle_cmd        pedido IPC "hello" ao daemon acima, mandado do host
+#                           por python3 -I (só cliente externo; o daemon testado
+#                           não o vê; no contêiner, pelo XDG_RUNTIME_DIR montado):
+#                           toggle_cmd[0] tem de ser o arquivo .AppImage
+#                           (host: o caminho real; contêiner: /work/app.AppImage).
+#                           Sem python3 no host fica NÃO TESTADO
+#   --version e -V          exit 0 e saída "dracaena <versão>"
 #
 # Variáveis opcionais:
-#   VERIFY_VERSION=1            torna --version critério (exit 0, saída não vazia)
+#   VERIFY_VERSION=0            artefato anterior ao --version: registra como
+#                               PENDENTE em vez de reprovar (padrão: 1, exige)
 #   VERIFY_PATH_TOOLS="readlink dirname"   relaxa PATH=/nonexistent para um
 #                               diretório só com essas ferramentas (confere que
 #                               não há python nele); o padrão é o critério estrito
@@ -38,7 +44,7 @@
 # Saída: 0 se tudo passou, 1 se alguma verificação falhou, 2 em erro de uso.
 set -euo pipefail
 
-usage() { sed -n '2,37p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 case "${1:-}" in
     -h|--help) usage; exit 0 ;;
     "") usage >&2; exit 2 ;;
@@ -52,7 +58,7 @@ IMAGE="${VERIFY_IMAGE:-ubuntu:22.04}"
 TOP="${VERIFY_TOP:-15}"
 TIMEOUT="${VERIFY_TIMEOUT:-120}"
 HOST_MODE="${VERIFY_HOST_MODE:-auto}"
-VERSION_REQUIRED="${VERIFY_VERSION:-0}"
+VERSION_REQUIRED="${VERIFY_VERSION:-1}"
 TOOLS="${VERIFY_PATH_TOOLS:-}"
 SRC="$(readlink -f "$1")"
 SRC_DIR="$(dirname "$SRC")"
@@ -60,6 +66,7 @@ SRC_DIR="$(dirname "$SRC")"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/appimage-verify.XXXXXX")"
 # shellcheck disable=SC2329  # chamada pelo trap EXIT
 cleanup() {
+    [[ -n "${CTR_NAME:-}" ]] && docker rm -f "$CTR_NAME" >/dev/null 2>&1
     if [[ "${VERIFY_KEEP:-0}" == 1 ]]; then
         echo "diretório de trabalho mantido: $WORK"
     else
@@ -120,7 +127,7 @@ judge() {  # nome rótulo tipo(help|version|doctor|daemon)
     rc="$(cat "$WORK/$name.rc")"
     out="$WORK/$name.out"
     if [[ "$kind" == version && "$VERSION_REQUIRED" != 1 ]]; then
-        record PENDENTE "$label" "exit $rc; aguardando --version no ponto de entrada (VERIFY_VERSION=1 ativa)"
+        record PENDENTE "$label" "exit $rc; não exigido (VERIFY_VERSION=0)"
         return 0
     fi
     if grep -Eq "$ERROR_RE" "$out"; then
@@ -139,10 +146,10 @@ judge() {  # nome rótulo tipo(help|version|doctor|daemon)
                 record FALHOU "$label" "exit $rc; esperado 0 com texto de uso"
             fi ;;
         version)
-            if [[ "$rc" == 0 && -s "$out" ]]; then
+            if [[ "$rc" == 0 ]] && grep -Eq '^dracaena [0-9]' "$out"; then
                 record OK "$label" "exit 0; $(head -n1 "$out")"
             else
-                record FALHOU "$label" "exit $rc; esperado 0 com saída não vazia"
+                record FALHOU "$label" "exit $rc; esperado 0 e \"dracaena <versão>\""
             fi ;;
         doctor)
             if [[ "$rc" != 0 && "$rc" != 1 ]]; then
@@ -161,7 +168,83 @@ judge() {  # nome rótulo tipo(help|version|doctor|daemon)
     esac
 }
 
-kind_of() { case "$1" in --help) echo help ;; --version) echo version ;; *) echo "$1" ;; esac; }
+kind_of() { case "$1" in --help) echo help ;; --version|-V) echo version ;; *) echo "$1" ;; esac; }
+case_name() { local c="${1//-/}"; echo "$2_$c"; }
+
+# Cliente "hello" externo: manda o pedido IPC cru e confere toggle_cmd[0].
+HELLO_PY='
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall(b"{\"v\": 0, \"id\": 1, \"cmd\": \"hello\"}\n")
+buf = b""
+while not buf.endswith(b"\n"):
+    chunk = s.recv(65536)
+    if not chunk:
+        break
+    buf += chunk
+print(buf.decode().strip())
+reply = json.loads(buf)
+cmd = (reply.get("data") or {}).get("toggle_cmd")
+print("toggle_cmd:", json.dumps(cmd), "| esperado[0]:", sys.argv[2])
+sys.exit(0 if reply.get("ok") and isinstance(cmd, list) and cmd and cmd[0] == sys.argv[2] else 3)
+'
+HAVE_PY=0
+command -v python3 >/dev/null 2>&1 && HAVE_PY=1
+
+# Sobe o daemon (daemon-probe.sh) em segundo plano com XDG_RUNTIME_DIR visível
+# do host, manda o hello de fora e então libera o probe para encerrar.
+run_daemon() {  # nome host|ctr modo
+    local name="$1" where="$2" mode="$3" run="$WORK/$1.run" expected pid rc=0 i=0
+    rm -rf "$run"
+    mkdir -m 700 "$run"
+    if [[ "$where" == host ]]; then
+        expected="$(readlink -f "$APP")"
+        timeout --kill-after=10 "$TIMEOUT" env PROBE_PATH="$TEST_PATH" PROBE_RUN_DIR="$run" \
+            PROBE_WAIT_FILE="$run/done" sh "$WORK/daemon-probe.sh" "$APP" "$mode" >"$WORK/$name.out" 2>&1 &
+        echo "sh daemon-probe.sh <app> $mode   # daemon --simulate + status; hello do host" >"$WORK/$name.cmd"
+    else
+        expected=/work/app.AppImage
+        CTR_NAME="appimage-verify-$$-$RANDOM"
+        # shellcheck disable=SC2016  # expande dentro do contêiner
+        timeout --kill-after=10 "$TIMEOUT" docker run --rm --name "$CTR_NAME" "${DOCKER_OPTS[@]}" -v "$run:/xdg" "$IMAGE" \
+            sh -c "$PREFIX"'PROBE_PATH="$p" PROBE_RUN_DIR=/xdg PROBE_WAIT_FILE=/xdg/done exec sh /work/daemon-probe.sh /work/app.AppImage extract' \
+            >"$WORK/$name.out" 2>&1 &
+        echo "$SHOWN -v <run>:/xdg sh /work/daemon-probe.sh /work/app.AppImage extract   # PATH=$SHOWN_PATH; hello do host pelo socket em <run>" >"$WORK/$name.cmd"
+    fi
+    pid=$!
+    while [[ ! -S "$run/dracaena/ctl.sock" ]] && kill -0 "$pid" 2>/dev/null && (( i < TIMEOUT * 2 )); do
+        sleep 0.5
+        i=$((i + 1))
+    done
+    if [[ ! -S "$run/dracaena/ctl.sock" ]]; then
+        echo "socket não apareceu" >"$WORK/$name.hello"; echo nosock >"$WORK/$name.hellorc"
+    elif [[ "$HAVE_PY" == 1 ]]; then
+        local hrc=0
+        timeout 30 python3 -I -c "$HELLO_PY" "$run/dracaena/ctl.sock" "$expected" >"$WORK/$name.hello" 2>&1 || hrc=$?
+        echo "$hrc" >"$WORK/$name.hellorc"
+    else
+        echo "sem python3 no host para o cliente externo" >"$WORK/$name.hello"; echo nopy >"$WORK/$name.hellorc"
+    fi
+    touch "$run/done"
+    wait "$pid" || rc=$?
+    echo "$rc" >"$WORK/$name.rc"
+    CTR_NAME=""
+}
+
+judge_hello() {  # nome rótulo
+    local hrc
+    hrc="$(cat "$WORK/$1.hellorc")"
+    echo "  hello (cliente externo python3 -I):"
+    sed 's/^/  | /' "$WORK/$1.hello"
+    case "$hrc" in
+        0) record OK "$2" "toggle_cmd[0] = arquivo .AppImage" ;;
+        nopy) record "NÃO TESTADO" "$2" "sem python3 no host para o cliente externo" ;;
+        nosock) record FALHOU "$2" "daemon não criou o socket" ;;
+        *) record FALHOU "$2" "hello rc $hrc; toggle_cmd não aponta para o .AppImage" ;;
+    esac
+}
 
 section "Arquivo"
 SIZE="$(stat -c %s "$SRC")"
@@ -170,7 +253,7 @@ echo "tamanho: $SIZE bytes ($(numfmt --to=iec-i --suffix=B "$SIZE"))"
 echo "sha256:  $(sha256sum "$SRC" | cut -d' ' -f1)"
 command -v file >/dev/null && echo "tipo:    $(file -b "$SRC")"
 echo "PATH dos testes: $([[ -n "$TOOLS" ]] && echo "diretório só com: $TOOLS" || echo /nonexistent)"
-echo "--version como critério: $([[ "$VERSION_REQUIRED" == 1 ]] && echo sim || echo 'não (PENDENTE)')"
+echo "--version como critério: $([[ "$VERSION_REQUIRED" == 1 ]] && echo sim || echo 'não (VERIFY_VERSION=0)')"
 
 # ---------------------------------------------------------------- (a) host
 section "(a) Host sem Python no ambiente (env -i, PATH=$TEST_PATH)"
@@ -197,8 +280,7 @@ host_run() {  # nome modo args...
     home="$(mktemp -d "$WORK/home.XXXXXX")"
     [[ "$mode" == extract ]] && extra=(--appimage-extract-and-run)
     if [[ "$1" == daemon ]]; then
-        capture "$name" env PROBE_HELLO=1 PROBE_PATH="$TEST_PATH" sh "$WORK/daemon-probe.sh" "$APP" "$mode"
-        echo "sh daemon-probe.sh <app> $mode   # daemon --simulate + status" >"$WORK/$name.cmd"
+        run_daemon "$name" host "$mode"
     else
         mkdir "$home/tmp"
         capture "$name" env -i HOME="$home" TMPDIR="$home/tmp" PATH="$TEST_PATH" "$APP" "${extra[@]}" "$@"
@@ -206,8 +288,8 @@ host_run() {  # nome modo args...
     fi
 }
 
-for cmd in --help doctor daemon --version; do
-    name="host_${cmd#--}"
+for cmd in --help doctor daemon --version -V; do
+    name="$(case_name "$cmd" host)"
     mode="$HOST_MODE"
     host_run "$name" "$mode" "$cmd"
     if [[ "$mode" == fuse && "$(cat "$WORK/$name.rc")" != 0 ]] \
@@ -220,6 +302,7 @@ for cmd in --help doctor daemon --version; do
     fi
     show "$name" "$(cat "$WORK/$name.cmd")"
     judge "$name" "host $cmd ($mode)" "$(kind_of "$cmd")"
+    if [[ "$cmd" == daemon ]]; then judge_hello "$name" "host hello.toggle_cmd"; fi
 done
 
 # ------------------------------------------------------------ (b) contêiner
@@ -233,9 +316,10 @@ elif ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
 else
     docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
     echo "imagem: $IMAGE ($(docker image inspect -f '{{.Id}}' "$IMAGE"))"
-    DOCKER=(docker run --rm --network none --user "$(id -u):$(id -g)" -e "VERIFY_PATH_TOOLS=$TOOLS"
-            -v "$WORK/app.AppImage:/work/app.AppImage:ro"
-            -v "$WORK/daemon-probe.sh:/work/daemon-probe.sh:ro" "$IMAGE")
+    DOCKER_OPTS=(--network none --user "$(id -u):$(id -g)" -e "VERIFY_PATH_TOOLS=$TOOLS"
+                 -v "$WORK/app.AppImage:/work/app.AppImage:ro"
+                 -v "$WORK/daemon-probe.sh:/work/daemon-probe.sh:ro")
+    DOCKER=(docker run --rm "${DOCKER_OPTS[@]}" "$IMAGE")
     # Mesmo PATH do host, montado dentro do contêiner com as ferramentas dele.
     # shellcheck disable=SC2016  # expande dentro do contêiner
     PREFIX='p=/nonexistent; if [ -n "$VERIFY_PATH_TOOLS" ]; then mkdir /tmp/shim; for t in $VERIFY_PATH_TOOLS; do c=$(command -v "$t") && ln -s "$c" /tmp/shim/"$t"; done; p=/tmp/shim; fi; '
@@ -254,12 +338,14 @@ else
         record FALHOU "contêiner sem python3" "a imagem tem Python; a prova não vale"
     fi
 
-    for cmd in --help doctor daemon --version; do
-        name="ctr_${cmd#--}"
+    for cmd in --help doctor daemon --version -V; do
+        name="$(case_name "$cmd" ctr)"
         if [[ "$cmd" == daemon ]]; then
-            # shellcheck disable=SC2016  # expande dentro do contêiner
-            capture "$name" "${DOCKER[@]}" sh -c "$PREFIX"'PROBE_PATH="$p" exec sh /work/daemon-probe.sh /work/app.AppImage extract'
-            show "$name" "$SHOWN sh /work/daemon-probe.sh /work/app.AppImage extract   # PATH=$SHOWN_PATH"
+            run_daemon "$name" ctr extract
+            show "$name" "$(cat "$WORK/$name.cmd")"
+            judge "$name" "contêiner $cmd" daemon
+            judge_hello "$name" "contêiner hello.toggle_cmd"
+            continue
         else
             # shellcheck disable=SC2016  # expande dentro do contêiner
             capture "$name" "${DOCKER[@]}" sh -c \

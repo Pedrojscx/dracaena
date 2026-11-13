@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       require_version:
-        description: 'Exigir "--version" na verificação (ative quando o ponto de entrada o tiver)'
+        description: 'Exigir "--version"/"-V" na verificação (desligue só para commits anteriores a ele)'
         type: boolean
-        default: false
+        default: true
 permissions:
   contents: read
 concurrency:
@@ -43,7 +43,8 @@ jobs:
       - name: Verificar sem Python do sistema (host e contêiner)
         env:
           VERIFY_IMAGE: ${{ env.BUILD_IMAGE }}
-          VERIFY_VERSION: ${{ inputs.require_version && '1' || '0' }}
+          # Em tag, sempre exige; no disparo manual, segue a entrada.
+          VERIFY_VERSION: ${{ (github.event_name == 'workflow_dispatch' && !inputs.require_version) && '0' || '1' }}
         run: |
           set -o pipefail
           bash packaging/appimage/verify.sh "$OUT_DIR/dracaena-x86_64.AppImage" \
