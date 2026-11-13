@@ -34,7 +34,8 @@ const HU = {
              return null; },
   byId(e, id) { const r = e.getRootNode(); return r && r.getElementById ? r.getElementById(id) : null; },
   owner(e) { return QH.chain(e).slice(1).find(c => c.tagName === 'FIELDSET' || ['group', 'radiogroup', 'listbox'].includes(HU.role(c))) || null; },
-  rcVisible(e) { const l = HU.label(e); return QH.visible(e) || (l && QH.visible(l)); },
+  labelShown(l) { if (!l || !QH.visible(l)) return false; const r = l.getBoundingClientRect(); return r.width > 2 && r.height > 2; },
+  rcVisible(e) { const l = HU.label(e); return l ? HU.labelShown(l) : QH.visible(e); },
   isBtn(e) { const t = (e.getAttribute('type') || '').toLowerCase();
              return (e.tagName === 'BUTTON' && t !== 'reset') || (e.tagName === 'INPUT' && ['submit', 'button'].includes(t)) || HU.role(e) === 'button'; },
   isFb(e) { const r = HU.role(e), live = e.getAttribute('aria-live');

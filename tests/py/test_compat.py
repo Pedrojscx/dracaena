@@ -1,7 +1,7 @@
 """Regressões genéricas medidas em recortes neutros de prática."""
 from fx import BrowserCase, REPO
 from dracaena.adapters.heuristic import HeuristicAdapter
-from dracaena.core.model import DROPDOWN, UNKNOWN
+from dracaena.core.model import DROPDOWN, SINGLE, UNKNOWN
 from dracaena.guard import Guard, Refused
 
 
@@ -97,3 +97,15 @@ class CompatibilityTests(BrowserCase):
         self.fixture('quiz_result.html')
         self.assertEqual(self.adapter.locate(self.page.main_frame), [])
         self.assertTrue(Guard(lambda _: None).result_visible(self.page.main_frame))
+
+    def test_quiz_mcq_single_ignores_navigation_and_clear_controls(self):
+        self.fixture('quiz_mcq_single.html')
+        hosts = self.adapter.locate(self.page.main_frame)
+        self.assertEqual(len(hosts), 1)
+        host = hosts[0]
+        question = self.adapter.extract(host)
+        self.assertEqual(question.kind, SINGLE)
+        self.assertEqual(len(question.options), 4)
+        self.assertTrue(question.stem)
+        self.assertIsNone(self.adapter.submit_target(host))
+        self.assertIsNone(self.adapter.reset_target(host))

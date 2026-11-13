@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import threading
+import json
+import stat
+import tempfile
+from pathlib import Path
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 from fx import REPO, BrowserCase
@@ -56,10 +60,87 @@ class RunnerTests(BrowserCase):
                 def __enter__(_): return _
                 def __exit__(_, *a): return None
             answer = lambda *_a, **_k: ('{"type":"SINGLE","answers":[0]}', 0.0)
-            self.assertEqual(runner.run(1, "quiz_mcq_single.html", max_questions=3, ask=answer,
+            self.assertEqual(runner.run(1, "quiz_mcq_single.html", max_questions=3, wait_seconds=0, ask=answer,
                                         log=logs.append, playwright_factory=lambda: PW()), 0)
             self.assertEqual(sum("(dry-run) faria:" in line for line in logs), 1)
             self.assertIn("parada: sem avanço (a navegação entre questões é do humano)", logs)
+        finally:
+            page.close()
+
+    def test_waits_for_human_navigation_without_another_claude_call(self):
+        page = self.browser.new_page()
+        try:
+            page.goto(self.serve("quiz_mcq_single.html"))
+            calls = []
+            class PW:
+                chromium = type("Chromium", (), {"connect_over_cdp": lambda _, __: type("B", (), {"contexts": self.browser.contexts, "close": lambda _: None})()})()
+                def __enter__(_): return _
+                def __exit__(_, *a): return None
+            def answer(*_a, **_k):
+                calls.append(1)
+                return '{"type":"SINGLE","answers":[0]}', 0.0
+            def advance(_seconds):
+                page.evaluate("document.querySelector('.qz-c2').textContent = 'Texto sintético seguinte'")
+            self.assertEqual(runner.run(1, "quiz_mcq_single.html", max_questions=2, ask=answer,
+                                        playwright_factory=lambda: PW(), wait_seconds=1, sleep=advance), 0)
+            self.assertEqual(len(calls), 2)
+        finally:
+            page.close()
+
+    def test_dry_run_records_private_review_without_duplicates(self):
+        page = self.browser.new_page()
+        with tempfile.TemporaryDirectory() as tmp:
+            record = Path(tmp) / "revisao" / "registro.jsonl"
+            try:
+                page.goto(self.serve("quiz_mcq_single.html"))
+                class PW:
+                    chromium = type("Chromium", (), {"connect_over_cdp": lambda _, __: type("B", (), {"contexts": self.browser.contexts, "close": lambda _: None})()})()
+                    def __enter__(_): return _
+                    def __exit__(_, *a): return None
+                answer = lambda *_a, **_k: ('{"type":"SINGLE","answers":[0]}', 0.0)
+                for _ in range(2):
+                    self.assertEqual(runner.run(1, "quiz_mcq_single.html", ask=answer,
+                                                playwright_factory=lambda: PW(), record_path=record), 0)
+                rows = [json.loads(line) for line in record.read_text().splitlines()]
+                self.assertEqual(len(rows), 1)
+                self.assertTrue(rows[0]["dry_run"])
+                self.assertEqual(rows[0]["chosen"], [{"index": 0, "text": "Alternativa sintética 1"}])
+                self.assertEqual(stat.S_IMODE(record.stat().st_mode), 0o600)
+                self.assertEqual(stat.S_IMODE(record.parent.stat().st_mode), 0o700)
+            finally:
+                page.close()
+
+    def test_real_does_not_write_review(self):
+        page = self.browser.new_page()
+        with tempfile.TemporaryDirectory() as tmp:
+            record = Path(tmp) / "revisao.jsonl"
+            try:
+                page.goto(self.serve("quiz_mcq_single.html"))
+                class PW:
+                    chromium = type("Chromium", (), {"connect_over_cdp": lambda _, __: type("B", (), {"contexts": self.browser.contexts, "close": lambda _: None})()})()
+                    def __enter__(_): return _
+                    def __exit__(_, *a): return None
+                answer = lambda *_a, **_k: ('{"type":"SINGLE","answers":[0]}', 0.0)
+                self.assertEqual(runner.run(1, "quiz_mcq_single.html", dry_run=False, ask=answer,
+                                            playwright_factory=lambda: PW(), record_path=record), 0)
+                self.assertFalse(record.exists())
+            finally:
+                page.close()
+
+    def test_result_summary_stops_without_claude_or_click(self):
+        page = self.browser.new_page()
+        try:
+            page.goto(self.serve("quiz_result.html"))
+            logs = []
+            class PW:
+                chromium = type("Chromium", (), {"connect_over_cdp": lambda _, __: type("B", (), {"contexts": self.browser.contexts, "close": lambda _: None})()})()
+                def __enter__(_): return _
+                def __exit__(_, *a): return None
+            def no_claude(*_a, **_k):
+                self.fail("o resumo não consulta o Claude")
+            self.assertEqual(runner.run(1, "quiz_result.html", ask=no_claude, log=logs.append,
+                                        playwright_factory=lambda: PW()), 0)
+            self.assertIn("parada: fim da atividade", logs)
         finally:
             page.close()
 

@@ -1,15 +1,20 @@
 <!doctype html>
-<html lang="pt-BR"><head><meta charset="utf-8"><title>Prática sintética</title></head><body>
-<main class="qz-c0" data-qz-region="activity">
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Prática sintética</title><style>.qz-sr-only{position:absolute;width:1px;height:1px;clip:rect(0,0,0,0);overflow:hidden}</style></head><body>
+<main class="qz-c0" data-qz-region="activity" role="main">
   <form class="qz-c1">
-    <h2>Texto sintético 1</h2>
+    <h4>Texto sintético 1</h4>
+    <input type="hidden" value="qz-hidden">
+    <div class="qz-c2">Texto sintético 2</div>
     <fieldset class="qz-c2">
-      <legend>Texto sintético 2</legend>
       <label><input type="radio" name="qz-answer" value="0"> Alternativa sintética 1</label>
       <label><input type="radio" name="qz-answer" value="1"> Alternativa sintética 2</label>
       <label><input type="radio" name="qz-answer" value="2"> Alternativa sintética 3</label>
       <label><input type="radio" name="qz-answer" value="3"> Alternativa sintética 4</label>
+      <label class="qz-sr-only"><input type="radio" name="qz-answer" value="-1"> Limpar escolha</label>
     </fieldset>
+    <button type="button" aria-label="Limpar minha escolha">Texto sintético 3</button>
+    <input type="submit" value="Próxima página">
+    <input type="submit" value="Finalizar tentativa ...">
   </form>
 </main>
 </body></html>
