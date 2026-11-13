@@ -80,7 +80,8 @@ def main(argv=None):
     if args.command == "daemon":
         from .daemon import Daemon, Simulator
         if not args.simulate:
-            parser.error("a integração com o núcleo ainda não está disponível; use --simulate")
+            print("Dracaena: a integração com o núcleo ainda não está disponível; use --simulate", file=sys.stderr)
+            return 2
         if hasattr(signal, "SIGTERM"):  # encerra limpo (remove o socket) em vez de morrer abruptamente
             signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
         try:
