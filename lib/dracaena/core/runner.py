@@ -182,7 +182,7 @@ def main(argv=None) -> int:
     endpoint = parser.add_mutually_exclusive_group()
     endpoint.add_argument("--port", type=int)
     endpoint.add_argument("--profile")
-    parser.add_argument("--url-contains", required=True)
+    parser.add_argument("--url-contains")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--real", action="store_true")
@@ -197,6 +197,8 @@ def main(argv=None) -> int:
         return review(Path(args.revisar) if args.revisar else record)
     if args.port is None and args.profile is None:
         parser.error("informe --port ou --profile")
+    if not args.url_contains:
+        parser.error("informe --url-contains")
     port = args.port if args.port is not None else read_port(args.profile)
     maximum = 1 if args.once else args.max_questions
     return run(port, args.url_contains, dry_run=not args.real, max_questions=maximum, record_path=record,

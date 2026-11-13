@@ -1,6 +1,7 @@
 """Regressões genéricas medidas em recortes neutros de prática."""
 from fx import BrowserCase, REPO
 from dracaena.adapters.heuristic import HeuristicAdapter
+from dracaena.core import contract
 from dracaena.core.model import DROPDOWN, SINGLE, UNKNOWN
 from dracaena.guard import Guard, Refused
 
@@ -107,5 +108,25 @@ class CompatibilityTests(BrowserCase):
         self.assertEqual(question.kind, SINGLE)
         self.assertEqual(len(question.options), 4)
         self.assertTrue(question.stem)
+        self.assertNotIn('Limpar escolha', question.stem)
+        self.assertNotIn('Limpar escolha', question.instruction)
         self.assertIsNone(self.adapter.submit_target(host))
         self.assertIsNone(self.adapter.reset_target(host))
+
+    def test_hidden_control_labels_are_absent_from_question_text(self):
+        self.page.set_content('''<style>.qz-sr{position:absolute;width:1px;height:1px;clip:rect(0,0,0,0);overflow:hidden}</style>
+        <form><h2>Enunciado sintético</h2><fieldset>
+          <label><input type="radio" name="qz"> Alternativa visível</label>
+          <label><input type="radio" name="qz"> Alternativa legítima</label>
+          <label aria-hidden="true"><input type="radio" name="qz"> Controle aria</label>
+          <label style="display:none"><input type="radio" name="qz"> Controle display</label>
+          <label class="qz-sr"><input type="radio" name="qz"> Controle recortado</label>
+        </fieldset></form>''')
+        host = self.adapter.locate(self.page.main_frame)[0]
+        question = self.adapter.extract(host)
+        text = contract.question_text(question)
+        self.assertEqual([option.text for option in question.options], ['Alternativa visível', 'Alternativa legítima'])
+        for hidden in ('Controle aria', 'Controle display', 'Controle recortado'):
+            self.assertNotIn(hidden, question.stem)
+            self.assertNotIn(hidden, question.instruction)
+            self.assertNotIn(hidden, text)

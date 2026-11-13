@@ -15,6 +15,17 @@ from dracaena.core import runner
 
 
 class RunnerTests(BrowserCase):
+    def test_review_cli_does_not_require_connection_flags(self):
+        calls = []
+        original = runner.review
+        runner.review = lambda path: calls.append(path) or 0
+        try:
+            self.assertEqual(runner.main(["--revisar"]), 0)
+            self.assertEqual(runner.main(["--revisar", "/tmp/revisao.jsonl"]), 0)
+            self.assertEqual(str(calls[1]), "/tmp/revisao.jsonl")
+        finally:
+            runner.review = original
+
     def serve(self, name):
         root = REPO / "tests" / "fixtures" / "compat"
         handler = lambda *a, **kw: SimpleHTTPRequestHandler(*a, directory=str(root), **kw)
