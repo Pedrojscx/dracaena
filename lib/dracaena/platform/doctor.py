@@ -50,9 +50,13 @@ def run():
         "Instale o Claude Code e confirme que o comando 'claude' está no PATH, ou informe o caminho nas configurações.")
     try:
         add("browser", True, browser.resolve(cfg.get("BROWSER_BIN", ""), cfg.get("BROWSER_FALLBACK", "")))
+    except browser.FallbackMissing as exc:
+        add("browser", False, str(exc),
+            f"Rode 'dracaena install-browser' para baixar o Chromium reserva (cerca de {browser.FALLBACK_SIZE} em disco, com confirmação) "
+            "ou informe um navegador Chromium nas configurações.")
     except browser.BrowserError as exc:
         add("browser", False, str(exc),
-            "Informe um navegador Chromium nas configurações ou rode 'playwright install chromium' para o navegador reserva.")
+            "Informe um navegador Chromium nas configurações ou rode 'dracaena install-browser' para o navegador reserva.")
     except Exception:
         add("browser", False, "Não foi possível verificar o navegador.",
             "Informe um navegador Chromium nas configurações.")
