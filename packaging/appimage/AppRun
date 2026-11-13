@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+HERE=$(dirname "$(readlink -f "$0")")
+export APPDIR="$HERE"
+# O runtime fornece o arquivo original, inclusive em extract-and-run.
+# Nunca substitua APPIMAGE por APPDIR ou pelo executável congelado.
+if [ -n "${APPIMAGE:-}" ]; then
+    APPIMAGE=$(readlink -f "$APPIMAGE")
+    export APPIMAGE
+fi
+exec "$HERE/usr/bin/dracaena" "$@"
