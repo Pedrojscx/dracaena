@@ -54,6 +54,10 @@ def run():
         add("browser", False, str(exc),
             f"Rode 'dracaena install-browser' para baixar o Chromium reserva (cerca de {browser.FALLBACK_SIZE} em disco, com confirmação) "
             "ou informe um navegador Chromium nas configurações.")
+    except browser.BrowserUnsupported as exc:
+        add("browser", False, str(exc),
+            "Navegadores em Flatpak/Snap podem não expor o CDP: informe em 'Navegador' (BROWSER_BIN) o caminho de um "
+            "executável Chromium instalado fora do sandbox.")
     except browser.BrowserError as exc:
         add("browser", False, str(exc),
             "Informe um navegador Chromium nas configurações ou rode 'dracaena install-browser' para o navegador reserva.")

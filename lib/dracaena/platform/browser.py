@@ -7,9 +7,11 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import signal
 import subprocess
+import tempfile
 import time
-from urllib.request import urlopen
+from urllib.request import ProxyHandler, build_opener, urlopen
 from .paths import data_dir, private_dir
 
 
@@ -33,7 +35,23 @@ BROWSERS_KEY = "PLAYWRIGHT_BROWSERS_PATH"
 FALLBACK_SIZE = "400 MB"  # espaço em disco do Chromium (sem o headless shell)
 
 
-def is_chromium(executable):
+CHROMIUM_NAMES = ("chromium", "google chrome", "microsoft edge", "vivaldi", "brave", "opera")
+# Navegadores sabidamente sem CDP: nunca são sondados (poderiam ignorar --user-data-dir).
+NOT_CHROMIUM = ("firefox", "mozilla", "librewolf", "waterfox", "floorp", "safari", "epiphany", "gnome web",
+                "webkit", "konqueror", "falkon", "qutebrowser", "midori")
+PROBE_TIMEOUT = 10
+PROBE_CACHE_LIMIT = 32
+
+
+class ProbeTimeout(BrowserError):
+    """A sonda não viu o CDP no tempo limite (não vai para o cache: pode ser lentidão passageira)."""
+
+
+def _product_text(executable):
+    """Identificação em minúsculas (ProductName no Windows, --version nos demais).
+
+    None quando o executável não pode ser executado; "" quando não se identifica.
+    """
     if os.name == "nt":
         import win32api
         try:
@@ -41,14 +59,229 @@ def is_chromium(executable):
             names = [win32api.GetFileVersionInfo(executable, f"\\StringFileInfo\\{language:04x}{codepage:04x}\\ProductName")
                      for language, codepage in translations]
         except Exception:
-            return False
-        return any(brand in name.lower() for name in names for brand in ("chromium", "google chrome", "microsoft edge", "vivaldi", "brave"))
+            return ""
+        return " ".join(str(name) for name in names).lower()
     try:
-        result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=5)
-    except (OSError, subprocess.TimeoutExpired):
+        result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=5,
+                                stdin=subprocess.DEVNULL)
+    except OSError:
+        return None
+    except subprocess.TimeoutExpired:
+        return ""
+    return (result.stdout + result.stderr).lower() if result.returncode == 0 else ""
+
+
+def is_chromium(executable):
+    """Chromium pelo nome; nome desconhecido só é aceito se a sonda confirmar o CDP."""
+    text = _product_text(executable)
+    if text is None:
         return False
-    text = (result.stdout + result.stderr).lower()
-    return result.returncode == 0 and any(name in text for name in ("chromium", "google chrome", "microsoft edge", "vivaldi", "brave"))
+    if any(name in text for name in CHROMIUM_NAMES):
+        return True
+    if any(name in text for name in NOT_CHROMIUM):
+        return False
+    return supports_cdp(executable)
+
+
+def _probe_cache_file():
+    return data_dir() / "browser-probe.json"
+
+
+def _load_probe_cache():
+    try:
+        data = json.loads(_probe_cache_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_probe_cache(cache):
+    try:
+        private_dir(data_dir())
+        target = _probe_cache_file()
+        temporary = target.with_name(target.name + ".tmp")
+        entries = dict(list(cache.items())[-PROBE_CACHE_LIMIT:])
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+            json.dump(entries, file, ensure_ascii=False)
+        os.replace(temporary, target)
+    except OSError:
+        pass  # cache é só otimização
+
+
+def supports_cdp(executable, timeout=PROBE_TIMEOUT):
+    """True se o executável abre o CDP; resultado guardado por (caminho real, mtime, tamanho)."""
+    located = shutil.which(executable) or executable
+    real = os.path.realpath(located)
+    try:
+        stat = os.stat(real)
+    except OSError:
+        return False
+    if not Path(real).is_file():
+        return False
+    stamp = {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}
+    cache = _load_probe_cache()
+    entry = cache.get(real)
+    if isinstance(entry, dict) and all(entry.get(k) == v for k, v in stamp.items()) and "ok" in entry:
+        return bool(entry["ok"])
+    try:
+        probe_cdp(located, timeout)
+        ok = True
+    except ProbeTimeout:
+        return False
+    except BrowserError:
+        ok = False
+    cache.pop(real, None)
+    cache[real] = {**stamp, "ok": ok}
+    _save_probe_cache(cache)
+    return ok
+
+
+def _isolated_env(base):
+    """Ambiente da sonda: HOME e pastas de perfil dentro do diretório temporário."""
+    env = dict(os.environ)
+    home = Path(base) / "home"
+    home.mkdir(mode=0o700)
+    if os.name == "nt":
+        for key in ("APPDATA", "LOCALAPPDATA"):
+            env[key] = str(home / key.lower())
+    else:
+        env["HOME"] = str(home)
+        for key, sub in (("XDG_CONFIG_HOME", ".config"), ("XDG_CACHE_HOME", ".cache"), ("XDG_DATA_HOME", ".local/share")):
+            env[key] = str(home / sub)
+    env["MOZ_NO_REMOTE"] = "1"
+    return env
+
+
+def _exited(proc):
+    """Sem colher o processo: o pid (e o grupo) seguem reservados até o kill final."""
+    if os.name == "nt":
+        return proc.poll() is not None
+    try:
+        return os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+    except ChildProcessError:
+        return True
+
+
+def _stop_group(proc, grace=3):
+    """Encerra o processo da sonda e todos os filhos: terminate e, se preciso, kill."""
+    import psutil
+    try:
+        children = psutil.Process(proc.pid).children(recursive=True)
+    except psutil.Error:
+        children = []
+    if os.name == "nt":
+        for item in children:
+            with contextlib.suppress(psutil.Error):
+                item.terminate()
+        with contextlib.suppress(OSError):
+            proc.terminate()
+    else:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGTERM)
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline and not _exited(proc):
+        time.sleep(.05)
+    if os.name == "nt":
+        with contextlib.suppress(OSError):
+            proc.kill()
+    else:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)  # o líder ainda não foi colhido: o grupo é o nosso
+    proc.wait()
+    _, alive = psutil.wait_procs(children, timeout=grace)
+    for item in alive:
+        with contextlib.suppress(psutil.Error):
+            item.kill()
+    psutil.wait_procs(alive, timeout=grace)
+
+
+def _remove_tree(path):
+    for _ in range(10):
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.exists(path):
+            return
+        time.sleep(.1)
+
+
+def probe_cdp(executable, timeout=PROBE_TIMEOUT):
+    """Sobe o executável headless num perfil temporário novo e confirma /json/version.
+
+    Nunca usa o perfil do usuário; o processo e o diretório são removidos em qualquer caminho.
+    """
+    base = tempfile.mkdtemp(prefix="dracaena-probe-")
+    proc = None
+    try:
+        profile = Path(base) / "profile"
+        profile.mkdir(mode=0o700)
+        options = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=_isolated_env(base))
+        if os.name == "nt":
+            options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            options["start_new_session"] = True
+        try:
+            proc = subprocess.Popen([executable, "--headless=new", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1",
+                                     "--user-data-dir=" + str(profile), "--no-first-run", "--no-default-browser-check",
+                                     "about:blank"], **options)
+        except OSError:
+            raise BrowserError("Não foi possível executar o navegador para verificar o CDP") from None
+        opener = build_opener(ProxyHandler({}))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if _exited(proc):
+                raise BrowserError("O navegador encerrou sem abrir o CDP")
+            try:
+                port = read_port(profile)
+            except (OSError, BrowserError):
+                time.sleep(.1)
+                continue
+            try:
+                with opener.open(f"http://127.0.0.1:{port}/json/version", timeout=1) as response:
+                    info = json.load(response)
+            except (OSError, ValueError):
+                time.sleep(.1)
+                continue
+            if isinstance(info, dict) and info.get("Browser") and info.get("webSocketDebuggerUrl"):
+                return info
+            raise BrowserError("O endpoint /json/version não parece de um navegador com CDP")
+        raise ProbeTimeout(f"O navegador não abriu o CDP em {timeout} s")
+    finally:
+        if proc is not None:
+            _stop_group(proc)
+        _remove_tree(base)
+
+
+def sandboxed(executable):
+    text = str(executable).replace("\\", "/")
+    return "/snap/bin/" in text or "/flatpak/exports/bin/" in text
+
+
+def _unwrap_exec(args):
+    """Executável real de um Exec= com env/flatpak/snap (melhor esforço)."""
+    while args and Path(args[0]).name == "env":
+        args = args[1:]
+        while args and ("=" in args[0] or args[0].startswith("-")):
+            args = args[1:]
+    if not args:
+        raise BrowserUnsupported("Entrada .desktop do navegador padrão sem executável: informe o executável nas configurações")
+    name = Path(args[0]).name
+    if name not in ("flatpak", "snap"):
+        return shutil.which(args[0]) or args[0]
+    rest = args[1:]
+    if not rest or rest[0] != "run":
+        raise BrowserUnsupported("Navegador Flatpak/Snap não reconhecido: informe o executável nas configurações")
+    names = [item for item in rest[1:] if not item.startswith(("-", "%", "@@"))]
+    if names:
+        app = names[0]
+        if name == "flatpak":
+            places = [Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "flatpak/exports/bin" / app,
+                      Path("/var/lib/flatpak/exports/bin") / app]
+        else:
+            places = [Path("/snap/bin") / app]
+        for place in places:
+            if place.is_file():
+                return str(place)
+    raise BrowserUnsupported("Navegador Flatpak/Snap sem executável exportado: informe o executável nas configurações")
 
 
 def default_browser():
@@ -72,10 +305,7 @@ def default_browser():
         if file.is_file():
             config = configparser.ConfigParser(interpolation=None)
             config.read(file, encoding="utf-8")
-            args = shlex.split(config["Desktop Entry"]["Exec"])
-            if args and Path(args[0]).name not in ("env", "flatpak", "snap"):
-                return shutil.which(args[0]) or args[0]
-            raise BrowserUnsupported("Navegador Flatpak/Snap ou wrapper detectado: configure o executável; suporte depende do sandbox")
+            return _unwrap_exec(shlex.split(config["Desktop Entry"]["Exec"]))
     raise BrowserError("Entrada .desktop do navegador padrão não encontrada")
 
 
@@ -83,7 +313,7 @@ def resolve(executable="", fallback="playwright"):
     if executable:
         if is_chromium(executable):
             return executable
-        raise BrowserError("Navegador configurado não é Chromium válido; configuração explícita tem prioridade")
+        raise BrowserError("Navegador configurado não é Chromium válido nem respondeu ao CDP; configuração explícita tem prioridade")
     try:
         candidate = default_browser()
     except BrowserUnsupported:
@@ -91,9 +321,13 @@ def resolve(executable="", fallback="playwright"):
     except (OSError, KeyError, subprocess.SubprocessError, BrowserError):
         candidate = ""
     if candidate:
+        if sandboxed(candidate):  # Flatpak/Snap: nome não basta, só a sonda decide
+            if supports_cdp(candidate):
+                return candidate
+            raise BrowserUnsupported("Navegador padrão em Flatpak/Snap não respondeu ao CDP")
         if is_chromium(candidate):
             return candidate
-        raise BrowserError("Navegador padrão detectado não é Chromium; configure um navegador compatível")
+        raise BrowserError("Navegador padrão detectado não é Chromium nem respondeu ao CDP; configure um navegador compatível")
     if fallback == "playwright":
         path = fallback_executable()
         if path:
