@@ -1,10 +1,20 @@
 #!/bin/sh
 set -eu
-case "$0" in
-    */*) RUN_DIR=${0%/*} ;;
-    *) RUN_DIR=. ;;
-esac
+# Raiz: APPDIR exportado pelo runtime (ponto de montagem ou diretório extraído),
+# que já resolve a invocação por link simbólico. $0 só quando APPDIR não existe.
+if [ -n "${APPDIR:-}" ]; then
+    RUN_DIR=$APPDIR
+else
+    case "$0" in
+        */*) RUN_DIR=${0%/*} ;;
+        *) RUN_DIR=. ;;
+    esac
+fi
 HERE=$(CDPATH= cd -P -- "$RUN_DIR" && pwd -P)
+if [ ! -x "$HERE/usr/bin/dracaena" ]; then
+    echo "AppRun: executável ausente em $HERE/usr/bin/dracaena" >&2
+    exit 127
+fi
 export APPDIR="$HERE"
 # O runtime fornece o arquivo original, inclusive em extract-and-run.
 # Nunca substitua APPIMAGE por APPDIR ou pelo executável congelado.

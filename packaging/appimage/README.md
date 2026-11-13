@@ -17,12 +17,18 @@ pypi.org e releases oficiais AppImage. Os pacotes do sistema e a imagem
 ubuntu:22.04 recebem atualizações; o `apt-get` não é fixado por versão ou snapshot.
 Este build não promete identidade bit a bit.
 
-`AppRun` preserva o `$APPIMAGE` original absoluto e define `$APPDIR` para o
-diretório do pacote. Isso permite ao launcher usar o arquivo estável. A execução
-direta de um AppDir extraído não cria uma variável APPIMAGE artificial.
-O launcher usa apenas builtins do shell: funciona com PATH vazio. Diretórios
-relativos e links simbólicos nos diretórios são resolvidos por `cd -P`/`pwd -P`.
-Execute o AppRun real, não um link simbólico avulso para esse arquivo fora do AppDir.
+`AppRun` usa como raiz o `$APPDIR` exportado pelo runtime (ponto de montagem
+ou diretório extraído), o que cobre a invocação do AppImage por link simbólico;
+só quando `$APPDIR` não existe a raiz vem de `$0`. Se a raiz não contém
+`usr/bin/dracaena`, sai com 127 e mensagem. Ele preserva o `$APPIMAGE` original
+absoluto e reexporta `$APPDIR` normalizado, para o launcher usar o arquivo
+estável. A execução direta de um AppDir extraído não cria uma variável APPIMAGE
+artificial. O launcher usa apenas builtins do shell: funciona com PATH vazio.
+Diretórios relativos e links simbólicos nos diretórios são resolvidos por
+`cd -P`/`pwd -P`. Sem runtime e sem `$APPDIR`, um link simbólico avulso para o
+AppRun fora do AppDir não é resolvido (não há `readlink`); defina `APPDIR`.
+No modo FUSE o runtime precisa de `fusermount` no PATH; sem ele, use
+`APPIMAGE_EXTRACT_AND_RUN=1`.
 
 Playwright é importado apenas no fallback do navegador e fica excluído (zero
 bytes do driver). Não entram navegador, Qt ou bandeja. `doctor` trata a ausência
