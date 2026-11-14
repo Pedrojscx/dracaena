@@ -38,6 +38,7 @@ def _host_fn(call: str) -> str:
 _LOCATE = _frame_fn("locate(a.profile)")
 _DIAGNOSE = _frame_fn("diagnose(a.profile)")
 _REGION = _frame_fn("region(a.limit)")
+_STRUCTURE = _frame_fn("structure()")
 _EXTRACT = _host_fn("extract(host, a.profile)")
 _OPTION = _host_fn("option(host, a, a.profile)")
 _BUTTONS = _host_fn("buttons(host, a.kind, a.profile)")
@@ -257,6 +258,28 @@ class GeneralAdapter:
                 continue
             if got["elements"] > best["elements"]:
                 best = got
+        return best
+
+    def structure(self, frame) -> dict:
+        """Mapa estrutural e perfil candidato com confiança por campo (formato: `structure` em engine.js).
+
+        Um resultado por quadro; devolve o de maior confiança (no empate, o de mais controles) com
+        `frame` = posição do quadro e `frames` = quantos foram lidos. Só marcação, nunca texto de conteúdo.
+        """
+        best, read = None, 0
+        for index, one in enumerate(self._frames(frame)):
+            try:
+                got = self._run(lambda one=one: one.evaluate(_STRUCTURE, {}))
+            except PageGone:
+                continue
+            read += 1
+            got["frame"] = index
+            rank = (got["confidence"]["global"], got["interactive"]["total"])
+            if best is None or rank > (best["confidence"]["global"], best["interactive"]["total"]):
+                best = got
+        if best is None:
+            raise PageGone("nenhum quadro pôde ser lido")
+        best["frames"] = read
         return best
 
 

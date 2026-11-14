@@ -83,6 +83,7 @@ class EngineBehaviourTests(unittest.TestCase):
                     before = [frame.evaluate(snapshot) for frame in page.frames]
                     adapter.diagnose(page.main_frame)
                     adapter.region(page.main_frame)
+                    adapter.structure(page.main_frame)
                     for host in adapter.locate(page.main_frame):
                         question = adapter.extract(host)
                         adapter.verdict(host)
