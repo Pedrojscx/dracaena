@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Exercícios</title><style>body{font:16px sans-serif;margin:24px}.sr{position:absolute;width:1px;height:1px;clip:rect(0,0,0,0);overflow:hidden}[hidden]{display:none!important}label,[role=radio],[role=option],[role=checkbox]{display:block;margin:6px 0;padding:6px}[aria-checked=true],[aria-selected=true],[aria-pressed=true]{background:#cfc}button.grande{display:block;width:320px;padding:18px;margin:8px 0;font-size:18px}td,th{padding:6px 10px}</style></head><body>
+<main>
+<section><p id="l1">Qual é a capital da França?</p>
+<div role="listbox" aria-labelledby="l1"><div role="option" aria-selected="false" tabindex="0">Lyon</div><div role="option" aria-selected="false" tabindex="0">Paris</div><div role="option" aria-selected="false" tabindex="0">Marselha</div></div></section>
+<section><p id="l2">Quais são instrumentos de corda? (Escolha duas.)</p>
+<div role="listbox" aria-multiselectable="true" aria-labelledby="l2"><div role="option" aria-selected="false" tabindex="0">Violino</div><div role="option" aria-selected="false" tabindex="0">Flauta</div><div role="option" aria-selected="false" tabindex="0">Violão</div><div role="option" aria-selected="false" tabindex="0">Tambor</div></div></section>
+</main>
+<script>
+document.addEventListener('click', (ev) => {
+  const t = ev.composedPath().find((e) => e.getAttribute && (['radio', 'option', 'checkbox'].includes(e.getAttribute('role')) || e.hasAttribute('aria-pressed')));
+  if (!t) return;
+  const attr = t.hasAttribute('aria-pressed') ? 'aria-pressed' : t.getAttribute('role') === 'option' ? 'aria-selected' : 'aria-checked';
+  const group = t.parentElement;
+  const multi = t.getAttribute('role') === 'checkbox' || group.getAttribute('aria-multiselectable') === 'true';
+  if (multi) { t.setAttribute(attr, t.getAttribute(attr) === 'true' ? 'false' : 'true'); return; }
+  for (const e of group.children) if (e.hasAttribute(attr)) e.setAttribute(attr, 'false');
+  t.setAttribute(attr, 'true');
+}, true);
+</script></body></html>
