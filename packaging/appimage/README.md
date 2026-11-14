@@ -42,5 +42,9 @@ Saídas adicionais: `bundled-sizes.txt` (bytes por arquivo, maior primeiro) e
 
 Verificação independente pertence a `verify.sh`, entregue separadamente.
 Para rodar sem FUSE, use `APPIMAGE_EXTRACT_AND_RUN=1`.
-Na base 178adf5, `--version` ainda não existe e o daemon exige `--simulate`;
-isso é pendência do Backend, não corrigida pelo wrapper de build.
+O runtime deixa `/tmp/appimage_extracted_<hash>` após
+`--appimage-extract-and-run` (aproximadamente 51 MiB por extração). Ele respeita
+`TMPDIR`: defina-o para direcionar esse diretório a outro local. O diretório
+persiste após a saída; considere esse consumo ao usar o modo sem FUSE.
+Com a base 5844b3a, `--help` lista os dez subcomandos e `--version` está
+disponível. O daemon real permanece indisponível; use `--simulate` para prática.
