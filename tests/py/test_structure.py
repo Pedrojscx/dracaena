@@ -65,8 +65,13 @@ class StructureTests(unittest.TestCase):
                                           "shadow_depth", "label", "group_label"})
 
     def test_aria_radios_with_submit_are_learned_without_help(self):
-        page, got = self.read(RADIOS.format(c="x"))
-        self.assertEqual((got["status"], got["kind"], got["ambiguous"]), ("verified", "SINGLE", False))
+        page, first = self.read(RADIOS.format(c="x"))
+        # Uma leitura só nunca dá verified: a segunda, com a anterior igual, confirma.
+        self.assertEqual((first["status"], first["kind"], first["ambiguous"]), ("unverified", "SINGLE", False))
+        self.assertIn("uma leitura só: falta repetir em outra execução", first["notes"])
+        got = self.adapter.structure(page.main_frame, {"fingerprint": first["fingerprint"], "profile": first["profile"]})
+        self.assertEqual(got["status"], "verified")
+        self.assertEqual((got["profile"], got["fingerprint"]), (first["profile"], first["fingerprint"]))
         self.assertGreaterEqual(got["confidence"]["global"], 0.85)
         self.assertEqual(got["check"], {"hosts": 1, "agree": True})
         self.assertEqual(got["controls"]["submit"][0]["hint"], "submit")
@@ -166,6 +171,19 @@ class StructureTests(unittest.TestCase):
         _, other = self.read(MIXED)
         self.assertEqual(one["fingerprint"], two["fingerprint"])
         self.assertNotEqual(one["fingerprint"], other["fingerprint"])
+
+    def test_changed_structure_or_other_profile_does_not_confirm(self):
+        page, first = self.read(RADIOS.format(c="x"))
+        _, other = self.read(MIXED)
+        moved = self.adapter.structure(page.main_frame, {"fingerprint": other["fingerprint"], "profile": first["profile"]})
+        self.assertEqual(moved["status"], "unverified")
+        self.assertIn("a estrutura mudou desde a leitura anterior", moved["notes"])
+        changed = dict(first["profile"], question={"container": "main", "stem": "h2"})
+        again = self.adapter.structure(page.main_frame, {"fingerprint": first["fingerprint"], "profile": changed})
+        self.assertEqual(again["status"], "unverified")
+        self.assertIn("a leitura anterior deu outro perfil", again["notes"])
+        for junk in ("texto", 7, {"fingerprint": first["fingerprint"]}):
+            self.assertEqual(self.adapter.structure(page.main_frame, junk)["status"], "unverified")
 
     def test_shadow_depth_limit_stops_the_capture(self):
         page = self.browser.new_page()

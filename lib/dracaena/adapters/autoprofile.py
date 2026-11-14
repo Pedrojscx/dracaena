@@ -68,6 +68,8 @@ Perfil anterior:
 {TOML}
 """
 
+UNCHECKED = "rascunho só de leitura: não validado com o contrato nem em duas questões"
+
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _URL = re.compile(r"(?i)\b(?:https?|wss?|ftp)://[^\s\"'<>]+")
 _TOKEN = re.compile(r"\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{16,}\b")
@@ -116,6 +118,21 @@ def _meta(status: str, confidence: float, fingerprint: str, generator: str) -> d
     return meta
 
 
+def prior_of(saved: profiles.Profile) -> dict | None:
+    """A leitura anterior guardada num perfil salvo, no formato que `structure` recebe (None se não há)."""
+    if not saved.meta.get("fingerprint"):
+        return None
+    return {"fingerprint": saved.meta["fingerprint"], "profile": saved.to_engine()}
+
+
+def status_after(saved: profiles.Profile, fingerprint: str) -> str:
+    """Status que um perfil salvo merece diante do fingerprint lido agora: divergente rebaixa verified."""
+    status = saved.meta.get("status", "unverified")
+    if status == "verified" and saved.meta.get("fingerprint") != fingerprint:
+        return "unverified"
+    return status
+
+
 def _draft(parsed: profiles.Profile, url: str, meta: dict | None = None) -> str:
     """TOML canônico: [site] vem da origem da página; o resto, só do que o validador aceitou."""
     tables = {name: body for name, body in parsed.tables.items() if name not in ("site", "meta")}
@@ -147,13 +164,16 @@ def _page_errors(diag: dict, threshold: float) -> str:
 
 def learn(frame, url: str, ask: Callable, cfg: dict | None = None, *, threshold: float = THRESHOLD,
           emit: Callable[[dict], None] | None = None, cancelled: Callable[[], bool] | None = None,
-          force: bool = False) -> dict:
+          force: bool = False, prior: dict | None = None) -> dict:
     """Lê a página e, se preciso, aprende um perfil. Nunca age na página.
 
     Devolve {"matches", "questions", "draft_toml", "layer", "confidence", "needed"} mais
     {"status", "candidates", "fields", "fingerprint", "notes"} do mapa estrutural; `draft_toml` vem vazio
     quando a heurística já basta. Levanta `AutoprofileError` (no_site | bad_request | cancelled | internal);
     o erro leva em `details` os candidatos por campo, quando há.
+
+    `prior` = {"fingerprint", "profile"} de uma leitura anterior, em outra execução (ver `prior_of`): sem ela
+    o rascunho nunca sai como verified.
     """
     def phase(name: str) -> None:
         if cancelled is not None and cancelled():
@@ -181,7 +201,7 @@ def learn(frame, url: str, ask: Callable, cfg: dict | None = None, *, threshold:
     extras = _extras(None)
     diag = base.diagnose(frame)
     try:
-        st = base.structure(frame)
+        st = base.structure(frame, prior)
     except Exception:  # noqa: BLE001 - o mapa estrutural é um acréscimo: sem ele, segue o caminho de sempre
         st = None
     extras = _extras(st)
@@ -198,6 +218,7 @@ def learn(frame, url: str, ask: Callable, cfg: dict | None = None, *, threshold:
             checked = GeneralAdapter(profile=profiles.parse(draft)).diagnose(frame)
             if not _page_errors(checked, threshold):
                 phase("draft")
+                extras["notes"] = [*extras["notes"], UNCHECKED]
                 return done({"matches": checked["matches"], "questions": len(checked["questions"]), "draft_toml": draft,
                              "layer": "profile", "confidence": checked["confidence"], "needed": True})
         except profiles.ProfileError:

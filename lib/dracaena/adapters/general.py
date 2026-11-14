@@ -38,7 +38,7 @@ def _host_fn(call: str) -> str:
 _LOCATE = _frame_fn("locate(a.profile)")
 _DIAGNOSE = _frame_fn("diagnose(a.profile)")
 _REGION = _frame_fn("region(a.limit)")
-_STRUCTURE = _frame_fn("structure()")
+_STRUCTURE = _frame_fn("structure(a.prior)")
 _EXTRACT = _host_fn("extract(host, a.profile)")
 _OPTION = _host_fn("option(host, a, a.profile)")
 _BUTTONS = _host_fn("buttons(host, a.kind, a.profile)")
@@ -260,16 +260,18 @@ class GeneralAdapter:
                 best = got
         return best
 
-    def structure(self, frame) -> dict:
+    def structure(self, frame, prior: dict | None = None) -> dict:
         """Mapa estrutural e perfil candidato com confiança por campo (formato: `structure` em engine.js).
 
         Um resultado por quadro; devolve o de maior confiança (no empate, o de mais controles) com
         `frame` = posição do quadro e `frames` = quantos foram lidos. Só marcação, nunca texto de conteúdo.
+        `prior` = {"fingerprint", "profile"} de uma leitura anterior, em outra execução: sem ela, ou se a
+        estrutura mudou, o status não passa de unverified.
         """
         best, read = None, 0
         for index, one in enumerate(self._frames(frame)):
             try:
-                got = self._run(lambda one=one: one.evaluate(_STRUCTURE, {}))
+                got = self._run(lambda one=one: one.evaluate(_STRUCTURE, {"prior": prior}))
             except PageGone:
                 continue
             read += 1

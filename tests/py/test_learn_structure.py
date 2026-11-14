@@ -68,11 +68,18 @@ class LearnTests(unittest.TestCase):
 
     def test_confident_structure_gives_a_draft_without_asking(self):
         page = self.open("botoes_grandes.html")
-        got = autoprofile.learn(page.main_frame, page.url, FakeClaude([]), force=True)
+        first = autoprofile.learn(page.main_frame, page.url, FakeClaude([]), force=True)
+        self.assertEqual((first["status"], first["layer"], first["needed"]), ("unverified", "profile", True))
+        self.assertIn(autoprofile.UNCHECKED, first["notes"])
+        saved = profiles.parse(first["draft_toml"])
+        self.assertEqual(saved.meta["status"], "unverified")
+        # Segunda execução: a leitura anterior, guardada no perfil, confirma.
+        got = autoprofile.learn(page.main_frame, page.url, FakeClaude([]), force=True, prior=autoprofile.prior_of(saved))
         self.assertEqual((got["status"], got["layer"], got["needed"]), ("verified", "profile", True))
         parsed = profiles.parse(got["draft_toml"])
         self.assertEqual((parsed.meta["status"], parsed.meta["generator"], parsed.meta["fingerprint"]),
                          ("verified", "structure 1", got["fingerprint"]))
+        self.assertEqual(parsed.to_engine(), saved.to_engine())
         self.assertGreaterEqual(parsed.meta["confidence"], 0.85)
         self.assertEqual(GeneralAdapter(profile=parsed).diagnose(page.main_frame)["layer"], "profile")
         self.assertEqual(set(autoprofile.probe(page.main_frame, page.url, FakeClaude([]))),
@@ -94,6 +101,24 @@ class LearnTests(unittest.TestCase):
         self.assertEqual(details["status"], "pause")
         self.assertIn("question.container", details["candidates"])
         self.assertTrue(all(len(found) <= 3 for found in details["candidates"].values()))
+
+    def test_diverging_fingerprint_demotes_a_verified_profile(self):
+        page = self.open("botoes_grandes.html")
+        first = autoprofile.learn(page.main_frame, page.url, FakeClaude([]), force=True)
+        prior = autoprofile.prior_of(profiles.parse(first["draft_toml"]))
+        verified = profiles.parse(autoprofile.learn(page.main_frame, page.url, FakeClaude([]), force=True, prior=prior)["draft_toml"])
+        self.assertEqual(verified.meta["status"], "verified")
+        self.assertEqual(autoprofile.status_after(verified, first["fingerprint"]), "verified")
+        # Outra página, de estrutura diferente: o perfil verificado volta a não verificado.
+        other = self.open("pagina_unica.html")
+        seen = GeneralAdapter().structure(other.main_frame, autoprofile.prior_of(verified))
+        self.assertNotEqual(seen["fingerprint"], verified.meta["fingerprint"])
+        self.assertEqual(seen["status"], "unverified")
+        self.assertIn("a estrutura mudou desde a leitura anterior", seen["notes"])
+        self.assertEqual(autoprofile.status_after(verified, seen["fingerprint"]), "unverified")
+        relearned = autoprofile.learn(other.main_frame, other.url, FakeClaude([]), force=True, prior=autoprofile.prior_of(verified))
+        self.assertEqual(profiles.parse(relearned["draft_toml"]).meta["status"], "unverified")
+        self.assertIsNone(autoprofile.prior_of(profiles.parse(BASE)))
 
     def test_canary_in_the_page_never_reaches_the_draft_or_the_result(self):
         page = self.open("botoes_grandes.html")
