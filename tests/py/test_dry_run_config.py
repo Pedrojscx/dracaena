@@ -50,15 +50,17 @@ class DryRunConfigTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 config.validate("DRY_RUN", value)
 
-    def test_legacy_import_understands_flags(self):
+    def test_legacy_import_never_turns_real_mode_on(self):
         legacy = self.root / "xdg" / "quiz-helper" / "config"
         legacy.parent.mkdir(parents=True)
-        legacy.write_text("DRY_RUN=0\n", encoding="utf-8")
-        self.assertIs(config.load()["DRY_RUN"], False)
-        (self.root / "config" / "config.json").unlink()
-        legacy.write_text("DRY_RUN=talvez\n", encoding="utf-8")
-        with self.assertRaises(ValueError):
-            config.load()
+        for text in ("DRY_RUN=0\n", "DRY_RUN=false\n", "DRY_RUN=talvez\n"):
+            with self.subTest(text=text):
+                legacy.write_text(text + "MAX_QUESTIONS=7\n", encoding="utf-8")
+                values = config.load()
+                self.assertIs(values["DRY_RUN"], True, "migração não ativa o modo real")
+                self.assertEqual(values["MAX_QUESTIONS"], 7)
+                self.assertIs(json.loads((self.root / "config" / "config.json").read_text())["DRY_RUN"], True)
+                (self.root / "config" / "config.json").unlink()
 
     def test_simulator_state_carries_dry_run_from_config(self):
         self.assertIs(Simulator().snapshot()["dry_run"], True)
