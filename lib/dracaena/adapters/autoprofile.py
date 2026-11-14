@@ -2,12 +2,18 @@
 
 Somente leitura do início ao fim (usa o adaptador, nunca a guarda):
 1. lê a página; se a heurística já tem confiança, não há o que aprender;
+1b. pede ao motor o mapa estrutural (`structure`): se ele já traz um perfil
+   candidato confiável (verified ou unverified), o rascunho sai dele, sem
+   consulta externa; abaixo disso, os candidatos por campo seguem no resultado;
 2. recorta a ESTRUTURA da região da atividade (o motor troca o texto pelo
    tamanho e não inclui valores de campos) e passa o recorte por `sanitize`;
 3. pede o perfil à Claude CLI e valida com `adapters.profile`; no erro, tenta
    mais uma vez informando o erro e a linha;
 4. confere o perfil na própria página (lendo) e devolve o rascunho no formato
-   do probe.start: {"matches": {seletor: n}, "questions": n, "draft_toml": str}.
+   do probe.start: {"matches": {seletor: n}, "questions": n, "draft_toml": str},
+   mais status, candidates, fields, fingerprint e notes (só marcação).
+
+O rascunho leva a tabela [meta]: confidence, status, fingerprint, generator, generated.
 
 O rascunho é reescrito daqui (TOML canônico): leva só seletores e metadados
 estruturais, nunca texto de questão. Quem salva é `platform.sites.save`.
@@ -15,6 +21,7 @@ estruturais, nunca texto de questão. Quem salva é `platform.sites.save`.
 
 from __future__ import annotations
 
+import datetime
 import json
 import re
 from collections.abc import Callable
@@ -74,6 +81,7 @@ class AutoprofileError(Exception):
     def __init__(self, code: str, msg: str):
         super().__init__(msg)
         self.code, self.msg = code, msg
+        self.details: dict = {}
 
 
 def sanitize(text: str, env: dict | None = None) -> str:
@@ -92,15 +100,33 @@ def origin_glob(url: str) -> str:
     return f"{parts.scheme}://{parts.hostname}{':' + str(parts.port) if parts.port else ''}/*"
 
 
-def _draft(parsed: profiles.Profile, url: str) -> str:
+def _extras(st: dict | None) -> dict:
+    """O que o mapa estrutural acrescenta ao resultado: só seletores, números e textos fixos."""
+    if not st:
+        return {"status": "none", "candidates": {}, "fields": {}, "fingerprint": "", "notes": []}
+    return {"status": st["status"], "candidates": st["candidates"], "fields": st["confidence"]["fields"],
+            "fingerprint": st["fingerprint"], "notes": [str(n)[:200] for n in st["notes"]]}
+
+
+def _meta(status: str, confidence: float, fingerprint: str, generator: str) -> dict:
+    meta = {"confidence": round(float(confidence), 2), "status": status, "generator": generator,
+            "generated": datetime.date.today().isoformat()}
+    if fingerprint:
+        meta["fingerprint"] = fingerprint
+    return meta
+
+
+def _draft(parsed: profiles.Profile, url: str, meta: dict | None = None) -> str:
     """TOML canônico: [site] vem da origem da página; o resto, só do que o validador aceitou."""
-    tables = {name: body for name, body in parsed.tables.items() if name != "site"}
+    tables = {name: body for name, body in parsed.tables.items() if name not in ("site", "meta")}
+    if meta:
+        tables["meta"] = meta
     host = urlsplit(url).hostname or "site"
     tables["site"] = {"name": host, "version": 0, "match": (origin_glob(url),)}
     for name, body in tables.items():
         for key, value in body.items():
             kind = profiles.SCHEMA[name][key][0]
-            if kind == profiles.SELECTOR and _PRIVATE.search(value):
+            if kind == profiles.SELECTOR and (_PRIVATE.search(value) or len(value) > 200):
                 raise profiles.ProfileError(f"{name}.{key}: o seletor traz um identificador; use classes ou papéis estruturais")
     return profiles.dump(tables)
 
@@ -124,8 +150,10 @@ def learn(frame, url: str, ask: Callable, cfg: dict | None = None, *, threshold:
           force: bool = False) -> dict:
     """Lê a página e, se preciso, aprende um perfil. Nunca age na página.
 
-    Devolve {"matches", "questions", "draft_toml", "layer", "confidence", "needed"}; `draft_toml` vem
-    vazio quando a heurística já basta. Levanta `AutoprofileError` (no_site | bad_request | cancelled | internal).
+    Devolve {"matches", "questions", "draft_toml", "layer", "confidence", "needed"} mais
+    {"status", "candidates", "fields", "fingerprint", "notes"} do mapa estrutural; `draft_toml` vem vazio
+    quando a heurística já basta. Levanta `AutoprofileError` (no_site | bad_request | cancelled | internal);
+    o erro leva em `details` os candidatos por campo, quando há.
     """
     def phase(name: str) -> None:
         if cancelled is not None and cancelled():
@@ -138,18 +166,43 @@ def learn(frame, url: str, ask: Callable, cfg: dict | None = None, *, threshold:
     def fail(code: str, msg: str, at: str):
         if emit is not None:
             emit({"event": "probe", "phase": "error", "done": PHASES.index(at), "total": len(PHASES)})
-        return AutoprofileError(code, msg)
+        error = AutoprofileError(code, msg)
+        error.details = extras
+        return error
+
+    def done(result: dict) -> dict:
+        if emit is not None:
+            emit({"event": "probe", "phase": "done", "done": len(PHASES), "total": len(PHASES)})
+        return {**result, **extras}
 
     phase("scan")
     origin_glob(url)
     base = GeneralAdapter()
+    extras = _extras(None)
     diag = base.diagnose(frame)
+    try:
+        st = base.structure(frame)
+    except Exception:  # noqa: BLE001 - o mapa estrutural é um acréscimo: sem ele, segue o caminho de sempre
+        st = None
+    extras = _extras(st)
     phase("match")
     if diag["supported"] and diag["confidence"] >= threshold and not force:
-        if emit is not None:
-            emit({"event": "probe", "phase": "done", "done": len(PHASES), "total": len(PHASES)})
-        return {"matches": {}, "questions": len(diag["questions"]), "draft_toml": "", "layer": diag["layer"],
-                "confidence": diag["confidence"], "needed": False}
+        return done({"matches": {}, "questions": len(diag["questions"]), "draft_toml": "", "layer": diag["layer"],
+                     "confidence": diag["confidence"], "needed": False})
+    if st and st["profile"] and st["status"] in ("verified", "unverified"):
+        # Perfil candidato do próprio motor: validado, conferido na página por leitura, sem consulta externa.
+        try:
+            head = {"site": {"name": "rascunho", "version": 0, "match": ("*",)}, **st["profile"]}
+            meta = _meta(st["status"], st["confidence"]["global"], st["fingerprint"], "structure 1")
+            draft = _draft(profiles.parse(profiles.dump(head)), url, meta)
+            checked = GeneralAdapter(profile=profiles.parse(draft)).diagnose(frame)
+            if not _page_errors(checked, threshold):
+                phase("draft")
+                return done({"matches": checked["matches"], "questions": len(checked["questions"]), "draft_toml": draft,
+                             "layer": "profile", "confidence": checked["confidence"], "needed": True})
+        except profiles.ProfileError:
+            pass
+        extras["status"] = "pause"
     if diag["code"] == "typed":
         raise fail("no_site", "Esta atividade pede resposta digitada, que ainda não é suportada.", "match")
     outline = sanitize(base.region(frame)["outline"])
@@ -176,15 +229,14 @@ def learn(frame, url: str, ask: Callable, cfg: dict | None = None, *, threshold:
                 parsed = profiles.parse(head + toml)
             except profiles.ProfileError as exc:
                 raise profiles.ProfileError(exc.msg, exc.line - offset if exc.line and exc.line > offset else exc.line) from None
-            draft = _draft(parsed, url)
+            draft = _draft(parsed, url, _meta("unverified", 0.5, extras["fingerprint"], "autoprofile 1"))
             final = profiles.parse(draft)
             checked = GeneralAdapter(profile=final).diagnose(frame)
             error = _page_errors(checked, threshold)
             if not error:
-                if emit is not None:
-                    emit({"event": "probe", "phase": "done", "done": len(PHASES), "total": len(PHASES)})
-                return {"matches": checked["matches"], "questions": len(checked["questions"]), "draft_toml": draft,
-                        "layer": "profile", "confidence": checked["confidence"], "needed": True}
+                extras["status"] = "unverified"
+                return done({"matches": checked["matches"], "questions": len(checked["questions"]), "draft_toml": draft,
+                             "layer": "profile", "confidence": checked["confidence"], "needed": True})
         except profiles.ProfileError as exc:
             error = str(exc)
         previous = RETRY.replace("{ERROR}", error).replace("{TOML}", sanitize(toml)[:4000])
@@ -195,7 +247,8 @@ def probe(frame, url: str, ask: Callable, cfg: dict | None = None, emit: Callabl
           cancelled: Callable[[], bool] | None = None) -> dict:
     """Implementação real do probe.start: {"matches", "questions", "draft_toml"} (só leitura)."""
     got = learn(frame, url, ask, cfg, emit=emit, cancelled=cancelled)
-    return {"matches": got["matches"], "questions": got["questions"], "draft_toml": got["draft_toml"]}
+    return {key: got[key] for key in ("matches", "questions", "draft_toml", "status", "candidates", "fields",
+                                       "fingerprint", "notes")}
 
 
 def dumps(result: dict) -> str:

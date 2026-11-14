@@ -12,6 +12,7 @@ Campo ou tabela desconhecida é erro, com a linha.
     [reset]     button                                                   # opcional
     [feedback]  correct, incorrect, text (opcional)                      # opcional
     [guard]     block_labels = []                                        # só acrescenta
+    [meta]      confidence (0 a 1), status, fingerprint, generator, generated   # opcional; o motor ignora
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ from pathlib import Path
 
 MAX_BYTES = 64 * 1024
 SELECTOR, TEXT, BOOL, INT, ATTR, GLOBS, LABELS, REGEX = "selector", "text", "bool", "int", "attr", "globs", "labels", "regex"
+UNIT, STATUS, WORD, DATE = "unit", "status", "word", "date"
+STATUSES = ("verified", "unverified", "experimental")
 
 # tabela -> campo -> (tipo, obrigatório)
 SCHEMA: dict[str, dict[str, tuple[str, bool]]] = {
@@ -39,6 +42,8 @@ SCHEMA: dict[str, dict[str, tuple[str, bool]]] = {
     "reset": {"button": (SELECTOR, True)},
     "feedback": {"correct": (SELECTOR, False), "incorrect": (SELECTOR, False), "text": (SELECTOR, False)},
     "guard": {"block_labels": (LABELS, False)},
+    "meta": {"confidence": (UNIT, False), "status": (STATUS, False), "fingerprint": (WORD, False),
+             "generator": (WORD, False), "generated": (DATE, False)},
 }
 REQUIRED_TABLES = ("site", "question")
 ENGINE_TABLES = ("question", "options", "dropdown", "submit", "reset", "feedback")
@@ -46,6 +51,8 @@ _FORBIDDEN = ("<", ">>", "{", "}", ";", "`", "\\", "\n", "\r", "javascript:", "e
 _ATTR = re.compile(r"[A-Za-z_][\w:.-]{0,63}")
 _TABLE = re.compile(r"^\s*\[\s*([\w.-]+)\s*\]")
 _KEY = re.compile(r"^\s*([\w-]+)\s*=")
+_WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}")
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?Z?)?")
 
 
 class ProfileError(ValueError):
@@ -63,6 +70,7 @@ class Profile:
     title: str = ""
     frame: str = ""
     block_labels: tuple[str, ...] = ()
+    meta: dict = field(default_factory=dict, compare=False)
     tables: dict = field(default_factory=dict, compare=False)
     slug: str = ""
 
@@ -109,6 +117,19 @@ def _value(kind: str, value, what: str, line):
     if kind == INT:
         if isinstance(value, bool) or not isinstance(value, int):
             raise ProfileError(f"{what} precisa ser um inteiro", line)
+        return value
+    if kind == UNIT:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+            raise ProfileError(f"{what} precisa ser um número de 0 a 1", line)
+        return round(float(value), 2)
+    if kind == STATUS:
+        if value not in STATUSES:
+            raise ProfileError(f"{what} precisa ser um de: {', '.join(STATUSES)}", line)
+        return value
+    if kind in (WORD, DATE):
+        if not isinstance(value, str) or not (_WORD if kind == WORD else _DATE).fullmatch(value):
+            raise ProfileError(f"{what} precisa ser " + ("um nome curto (letras, dígitos, espaço, ponto, hífen)"
+                                                         if kind == WORD else "uma data AAAA-MM-DD"), line)
         return value
     if kind == ATTR:
         if not isinstance(value, str) or not _ATTR.fullmatch(value):
@@ -177,7 +198,8 @@ def parse(text: str, slug: str = "") -> Profile:
     if drop is not None and drop.get("native") is False and not (drop.get("button") and drop.get("option")):
         raise ProfileError("dropdown com native = false precisa de button e option", where.get(("dropdown", None)))
     return Profile(name=site["name"], match=site["match"], title=site.get("title", ""), frame=site.get("frame", ""),
-                   block_labels=tuple(tables.get("guard", {}).get("block_labels", ())), tables=tables, slug=slug)
+                   block_labels=tuple(tables.get("guard", {}).get("block_labels", ())), tables=tables, slug=slug,
+                   meta=dict(tables.get("meta", {})))
 
 
 def load_all(directory, warn: Callable[[str], None] | None = None) -> list[Profile]:
@@ -216,7 +238,7 @@ def dump(tables: dict) -> str:
             value = body[key]
             if isinstance(value, bool):
                 text = "true" if value else "false"
-            elif isinstance(value, int):
+            elif isinstance(value, (int, float)):
                 text = str(value)
             elif isinstance(value, (list, tuple)):
                 text = "[" + ", ".join(_quote(v) for v in value) + "]"

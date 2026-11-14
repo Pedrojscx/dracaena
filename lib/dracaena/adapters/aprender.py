@@ -4,7 +4,8 @@ Só lê a página (nenhum clique, nenhuma digitação, nenhuma escolha). Grava o
 perfil apenas com --salvar, por `platform.sites.save`, fora do repositório.
 
 Saída: uma linha JSON.
-    {"ok": true, "data": {"matches", "questions", "draft_toml", "layer", "confidence", "saved"}}
+    {"ok": true, "data": {"matches", "questions", "draft_toml", "layer", "confidence", "saved",
+                          "status", "candidates", "fields", "fingerprint", "notes"}}
     {"ok": false, "error": "...", "code": "no_browser|no_site|bad_request|exists|cancelled|internal"}
 """
 
@@ -52,12 +53,16 @@ def run(port: int, url_contains: str, *, save: str | None = None, overwrite: boo
             finally:
                 browser.close()
     except autoprofile.AutoprofileError as exc:
-        return _say(out, {"ok": False, "error": exc.msg, "code": exc.code})
+        failed = {"ok": False, "error": exc.msg, "code": exc.code}
+        if exc.details.get("candidates"):
+            failed["data"] = exc.details      # pausa: os candidatos por campo, para quem decide
+        return _say(out, failed)
     except claude.ClaudeError as exc:
         return _say(out, {"ok": False, "error": f"Falha do Claude ({exc})", "code": "internal"})
     except Exception:  # falhas inesperadas não expõem conteúdo da página
         return _say(out, {"ok": False, "error": "Não foi possível ler a atividade.", "code": "internal"})
     data = {key: got[key] for key in ("matches", "questions", "draft_toml", "layer", "confidence")}
+    data.update({key: got.get(key, default) for key, default in autoprofile._extras(None).items()})
     data["saved"] = None
     if save is not None and got["draft_toml"]:
         try:
