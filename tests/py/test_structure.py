@@ -119,6 +119,42 @@ class StructureTests(unittest.TestCase):
                 finally:
                     page.close()
 
+    def test_hidden_alternatives_are_not_options(self):
+        """Oculto por atributo, estilo ou bloco de leitor de tela: fora das opções, na heurística e no perfil."""
+        hidden = ('<label aria-hidden="true"><input type="radio" name="a"> oculta um</label>'
+                  '<label hidden><input type="radio" name="a"> oculta dois</label>'
+                  '<label style="display:none"><input type="radio" name="a"> oculta três</label>'
+                  '<label style="visibility:hidden"><input type="radio" name="a"> oculta quatro</label>'
+                  '<label style="position:absolute;width:1px;height:1px;overflow:hidden"><input type="radio" name="a"> oculta cinco</label>'
+                  '<div style="position:absolute;width:1px;height:1px;overflow:hidden"><label><input type="radio" name="a"> oculta seis</label></div>')
+        page, got = self.read('<main><div class="bloco"><p>Enunciado sintético de teste</p>'
+                              '<label><input type="radio" name="a"> um</label><label><input type="radio" name="a"> dois</label>'
+                              '<label><input type="radio" name="a"> três</label>' + hidden + '</div></main>')
+        self.assertEqual(got["check"], {"hosts": 1, "agree": True})
+        self.assertEqual(got["candidates"]["options.item"][0]["count"], 3)
+        learned = GeneralAdapter(profile=as_profile(got["profile"]))
+        for adapter in (self.adapter, learned):
+            question = adapter.extract(adapter.locate(page.main_frame)[0])
+            self.assertEqual([o.text for o in question.options], ["um", "dois", "três"])
+
+    def test_pages_the_heuristic_reads_well_get_a_matching_profile(self):
+        wanted = {"lms_paginado.html", "quiz_mcq_single.html", "botoes_estado.html"}
+        seen = set()
+        for entry in manifest():
+            if entry["file"] not in wanted:
+                continue
+            with self.subTest(fixture=entry["file"]):
+                page = self.browser.new_page()
+                try:
+                    page.goto(self.server.url(entry))
+                    got = self.adapter.structure(page.main_frame)
+                    self.assertTrue(got["check"]["agree"])
+                    self.assertIn(got["status"], ("verified", "unverified"))
+                    seen.add(entry["file"])
+                finally:
+                    page.close()
+        self.assertEqual(seen, wanted)
+
     def test_typed_answer_is_experimental_and_has_no_profile(self):
         _, got = self.read('<main><p>Enunciado sintético</p><textarea></textarea><button type="button">Enviar</button></main>')
         self.assertEqual((got["status"], got["kind"], got["profile"]), ("experimental", "TEXT", None))
