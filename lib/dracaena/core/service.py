@@ -41,6 +41,7 @@ COMMANDS = ("status", "toggle", "stop", "ask", "once")
 SUPPORTED_KINDS = ("SINGLE", "MULTI", "DROPDOWN")
 ONCE_WAIT_SECONDS = 180.0   # igual ao --espera padrão do runner
 POLL_SECONDS = 0.2
+_END_EVENTS = object()
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,7 @@ class Service:
         self._cond = threading.Condition(self._lock)
         self.state, self.site, self.error = "idle", "", ""
         self.count, self.maximum = 0, int(max_questions or 0)
+        self._closed = False
         self._gen = 0              # geração do laço atual; laço de geração antiga não muda nada
         self._oneshot = None       # "ask" | "once" pedido com o laço pausado
         self._thread: threading.Thread | None = None
@@ -117,9 +119,32 @@ class Service:
         self._events: queue.Queue = queue.Queue()
         self._dispatcher: threading.Thread | None = None
 
+    def close(self, timeout: float = 5.0) -> None:
+        """Para o trabalho e drena eventos; joins compartilham o prazo informado.
+
+        Uma dependência bloqueada pode sobreviver ao prazo, mas não poderá
+        iniciar outra ação. Uma nova chamada pode esperar seu encerramento.
+        Em callback, a entrega termina depois que o próprio callback retorna.
+        """
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._lock:
+            if not self._closed:
+                self._gen += 1
+                self._oneshot = None
+                self._set(state="idle", error="")
+                self._closed = True
+                self._events.put(_END_EVENTS)
+            worker, dispatcher = self._thread, self._dispatcher
+        current = threading.current_thread()
+        for thread in (worker, dispatcher):
+            if thread is not None and thread is not current:
+                thread.join(max(0.0, deadline - time.monotonic()))
+
     # ---- eventos
     def subscribe(self, cb: Callable[[dict], None]) -> Callable[[], None]:
         with self._lock:
+            if self._closed:
+                raise ServiceError("bad_state", "O serviço já foi fechado.")
             self._subs.append(cb)
 
         def unsubscribe():
@@ -130,6 +155,8 @@ class Service:
 
     def _emit(self, event: dict) -> None:
         with self._lock:
+            if self._closed:
+                return
             self._events.put(event)
             if self._dispatcher is None:
                 self._dispatcher = threading.Thread(target=self._deliver, name="dracaena-events", daemon=True)
@@ -138,6 +165,10 @@ class Service:
     def _deliver(self) -> None:
         while True:
             event = self._events.get()
+            if event is _END_EVENTS:
+                with self._lock:
+                    self._subs.clear()
+                return
             if isinstance(event, threading.Event):
                 event.set()
                 continue
@@ -152,7 +183,16 @@ class Service:
     def flush(self, timeout: float = 5.0) -> bool:
         """Espera a entrega dos eventos já emitidos (útil em testes)."""
         done = threading.Event()
-        self._emit(done)
+        with self._lock:
+            if threading.current_thread() is self._dispatcher:
+                return False
+            closed, dispatcher = self._closed, self._dispatcher
+            if not closed:
+                self._emit(done)
+        if closed:
+            if dispatcher is not None:
+                dispatcher.join(timeout)
+            return dispatcher is None or not dispatcher.is_alive()
         return done.wait(timeout)
 
     def _log(self, msg: str, level: str = "info") -> None:
@@ -168,7 +208,7 @@ class Service:
     def _set(self, gen: int | None = None, **changes) -> bool:
         """Muda o estado e emite ``state``; com ``gen``, só se o laço ainda for o atual."""
         with self._lock:
-            if gen is not None and gen != self._gen:
+            if self._closed or (gen is not None and gen != self._gen):
                 return False
             for key, val in changes.items():
                 setattr(self, key, val)
@@ -190,6 +230,8 @@ class Service:
             state = self.state
             if cmd == "status":
                 return self.snapshot()
+            if self._closed:
+                raise ServiceError("bad_state", "O serviço já foi fechado.")
             if cmd == "stop":
                 if state == "idle":
                     raise ServiceError("bad_state", "Nada em execução para parar")
@@ -247,7 +289,7 @@ class Service:
     # ---- laço (thread própria)
     def _alive(self, gen: int) -> bool:
         with self._lock:
-            return gen == self._gen
+            return not self._closed and gen == self._gen
 
     def _pausing(self, gen: int, shot: str | None) -> bool:
         """Interromper a espera: laço parado, pausa pedida ou um ask/once novo com o laço pausado."""
@@ -421,10 +463,13 @@ class Service:
         guard.bind(frame, host, question.id)
         try:
             for target in _answers(adapter, host, answer):
-                if not self._alive(gen):
-                    log("parada: interrompido antes de agir")
-                    return Step("interrupted", question)
-                guard.perform(target, target.label)
+                # Serializa o início da ação com close: não há intervalo entre
+                # conferir a geração e entregar o alvo à única porta de ação.
+                with self._lock:
+                    if not self._alive(gen):
+                        log("parada: interrompido antes de agir")
+                        return Step("interrupted", question)
+                    guard.perform(target, target.label)
         except ResultScreen:
             log("parada: fim da atividade")
             return Step("end", question)
