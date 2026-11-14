@@ -70,7 +70,7 @@ def main(argv=None):
     parser.add_argument("-V", "--version", action="version", version=f"dracaena {package_version()}",
                         help="mostra a versão e sai")
     sub = parser.add_subparsers(dest="command", required=True, metavar="comando")
-    daemon = sub.add_parser("daemon", help="inicia o servidor local")
+    daemon = sub.add_parser("daemon", help="inicia o servidor local (modo simulação por padrão: não clica na página)")
     daemon.add_argument("--simulate", action="store_true", help="usa o simulador no lugar do núcleo")
     commands = {
         "loop": "inicia ou pausa o laço de respostas (o mesmo que toggle)",
@@ -88,14 +88,21 @@ def main(argv=None):
     install.add_argument("--yes", action="store_true", help="confirma o download sem perguntar")
     args = parser.parse_args(argv)
     if args.command == "daemon":
-        from .daemon import Daemon, Simulator
-        if not args.simulate:
-            print("Dracaena: a integração com o núcleo ainda não está disponível; use --simulate", file=sys.stderr)
-            return 2
+        from .daemon import Daemon, Simulator, configured_dry_run, real_service
+        if args.simulate:
+            server = Daemon(Simulator(), simulate=True)
+        else:
+            # O modo vem só da chave DRY_RUN (padrão: simulação); não há argumento que ative o modo real.
+            try:
+                server = Daemon(real_service(configured_dry_run()), service_factory=real_service)
+            except ImportError:
+                print(json.dumps({"ok": False, "error": "O núcleo do Dracaena não está disponível neste executável "
+                                  "(falta o módulo de automação do navegador)."}, ensure_ascii=False))
+                return 1
         if hasattr(signal, "SIGTERM"):  # encerra limpo (remove o socket) em vez de morrer abruptamente
             signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
         try:
-            Daemon(Simulator(), simulate=True).run()
+            server.run()
         except KeyboardInterrupt:
             return 0
         except (OSError, RuntimeError) as exc:

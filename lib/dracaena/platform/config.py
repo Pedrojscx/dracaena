@@ -83,8 +83,8 @@ def load():
                 continue
             key, value = line.split("=", 1)
             key, value = key.strip(), value.strip().strip("\"'")
-            if key not in DEFAULTS:
-                continue
+            if key not in DEFAULTS or key == "DRY_RUN":
+                continue  # o modo real nunca vem de migração: só de config.set explícito
             if type(DEFAULTS[key]) is bool:
                 flags = {"1": True, "true": True, "sim": True, "0": False, "false": False, "nao": False, "não": False}
                 if value.lower() not in flags:
