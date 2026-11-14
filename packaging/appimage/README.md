@@ -48,3 +48,26 @@ O runtime deixa `/tmp/appimage_extracted_<hash>` após
 persiste após a saída; considere esse consumo ao usar o modo sem FUSE.
 Com a base 5844b3a, `--help` lista os dez subcomandos e `--version` está
 disponível. O daemon real permanece indisponível; use `--simulate` para prática.
+
+## Requisitos e resíduos
+
+- **glibc 2.35 ou mais nova** (Linux x86_64). O build roda em ubuntu:22.04 e o maior
+  símbolo exigido pelos binários do pacote é `GLIBC_2.35` (medido com `objdump -T`).
+  Distribuições com glibc mais velha não são suportadas.
+- **Sem FUSE:** `--appimage-extract-and-run` (ou `APPIMAGE_EXTRACT_AND_RUN=1`) extrai o
+  pacote para `$TMPDIR/appimage_extracted_<hash>` (padrão `/tmp`), cerca de 51 MiB.
+  O diretório **não é apagado** na saída. Apague-o à mão ou defina `TMPDIR`
+  para um local que você limpe.
+- **python-xlib** (atalho global X11) fica fora do AppImage da fase 1. Ele vem de
+  `requirements.txt` só para a UI. O build usa `requirements-build.txt`, que não o lista,
+  e o pacote não tem arquivos `xlib`.
+
+## Verificação dos 12 casos
+
+Da raiz do repositório, depois do build:
+
+    python3 -I packaging/appimage/check-cases.py [arquivo.AppImage]
+
+O script roda `--help`, `--version` e `doctor` com `env -i`, em FUSE e em
+`--appimage-extract-and-run`, direto e por link simbólico. Ele imprime o HEAD e o
+SHA-256 do artefato verificado e sai com 0 só se os 12 casos passarem.
