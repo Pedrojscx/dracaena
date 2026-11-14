@@ -189,6 +189,26 @@ class StateTests(ServiceCase):
         self.assertEqual(svc.handle("stop", {})["state"], "idle")
         self.assertEqual(self.site.acted, 0, "dry-run não age na página")
 
+    def test_slow_discovery_does_not_block_commands_or_act_after_stop(self):
+        entered, release = threading.Event(), threading.Event()
+        def tabs(_port):
+            entered.set()
+            release.wait(5)
+            return [{"type": "page", "url": "http://127.0.0.1/pratica"}]
+        svc = self.make(tabs=tabs)
+        self.addCleanup(release.set)
+        started = time.monotonic()
+        svc.handle("toggle", {})
+        self.assertLess(time.monotonic() - started, .5)
+        self.assertTrue(entered.wait(2))
+        self.assertEqual(svc.handle("status", {})["state"], "running")
+        svc.handle("stop", {})
+        release.set()
+        svc._thread.join(2)
+        self.assertFalse(svc._thread.is_alive())
+        self.assertEqual(self.asker.calls, 0)
+        self.assertEqual(svc.state, "idle")
+
     def test_events_in_order(self):
         svc = self.make()
         svc.handle("ask", {})
@@ -321,8 +341,9 @@ class ErrorTests(ServiceCase):
         def missing():
             raise ServiceError("no_browser", "sem navegador")
         self.make(endpoint=missing)
-        self.assertEqual(self.code("toggle"), "no_browser")
-        self.assertEqual(self.svc.state, "idle")
+        self.svc.handle("toggle", {})
+        self.assertTrue(self.state("error"))
+        self.assertEqual(self.svc.error, "sem navegador")
 
     def test_default_endpoint_without_profile(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"XDG_DATA_HOME": tmp, "APPDATA": tmp}):
@@ -332,10 +353,12 @@ class ErrorTests(ServiceCase):
 
     def test_no_site(self):
         self.make(tabs=lambda _p: [{"type": "page", "url": "about:blank"}])
-        self.assertEqual(self.code("toggle"), "no_site")
+        self.svc.handle("toggle", {})
+        self.assertTrue(self.state("error"))
         site = Site()
         self.make(site=site, registry=Registry([Adapter(site, score=0)]))
-        self.assertEqual(self.code("ask"), "no_site")
+        self.svc.handle("ask", {})
+        self.assertTrue(self.state("error"))
 
     def test_no_question_in_tab_is_error_state(self):
         site = Site()
