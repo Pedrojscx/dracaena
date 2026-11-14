@@ -137,15 +137,10 @@ class ServiceCase(unittest.TestCase):
         self.svc = Service(**options)
         self.events = []
         self.svc.subscribe(self.events.append)
-        self.addCleanup(self.stop)
+        svc, asker = self.svc, self.asker
+        self.addCleanup(svc.close)
+        self.addCleanup(asker.gate.set)
         return self.svc
-
-    def stop(self):
-        if self.svc.state != "idle":
-            self.svc.handle("stop", {})
-        self.asker.gate.set()
-        if self.svc._thread is not None:
-            self.svc._thread.join(5)
 
     def state(self, value):
         return wait_for(lambda: self.svc.state == value)
@@ -400,6 +395,112 @@ class SubscriptionTests(ServiceCase):
         self.assertEqual(self.kinds("state")[-1]["state"], "idle")
 
 
+class CloseTests(ServiceCase):
+    def assert_stopped(self, svc):
+        self.assertFalse(any(t.is_alive() for t in (svc._thread, svc._dispatcher) if t))
+        self.assertFalse(any(t.name.startswith("dracaena-") for t in threading.enumerate()))
+
+    def test_close_drains_events_and_is_idempotent(self):
+        svc = self.make()
+        entered, release = threading.Event(), threading.Event()
+        delivered = []
+        def callback(event):
+            if event.get("number") == 0:
+                entered.set()
+                release.wait(2)
+            if "number" in event:
+                delivered.append(event["number"])
+        svc.subscribe(callback)
+        self.addCleanup(release.set)
+        for number in range(4):
+            svc._emit({"event": "log", "number": number})
+        self.assertTrue(entered.wait(2))
+        closer = threading.Thread(target=svc.close)
+        closer.start()
+        self.assertTrue(wait_for(lambda: svc._closed))
+        release.set()
+        closer.join(2)
+        self.assertFalse(closer.is_alive())
+        self.assertEqual(delivered, [0, 1, 2, 3])
+        svc.close()
+        self.assertTrue(svc.flush(.1))
+        self.assert_stopped(svc)
+
+    def test_closed_service_cannot_restart(self):
+        svc = self.make(dry_run=False)
+        svc.close()
+        dispatcher = svc._dispatcher
+        for command in ("toggle", "stop", "ask", "once"):
+            with self.assertRaises(ServiceError) as ctx:
+                svc.handle(command, {})
+            self.assertEqual(ctx.exception.code, "bad_state")
+            self.assertIn("fechado", ctx.exception.msg)
+        with self.assertRaises(ServiceError):
+            svc.subscribe(lambda _: None)
+        svc._emit({"event": "log", "msg": "ignorado"})
+        self.assertIs(svc._dispatcher, dispatcher)
+        self.assertEqual(svc.handle("status", {})["state"], "idle")
+        self.assertEqual(self.site.acted, 0)
+        self.assert_stopped(svc)
+
+    def test_close_from_subscriber_drains_without_self_join(self):
+        svc = self.make()
+        returned = threading.Event()
+        delivered = []
+        def callback(event):
+            if event.get("msg") == "fechar":
+                svc.close()
+                returned.set()
+            delivered.append(event)
+        svc.subscribe(callback)
+        with svc._lock:
+            svc._emit({"event": "log", "msg": "fechar"})
+            svc._emit({"event": "log", "msg": "pendente"})
+        self.assertTrue(returned.wait(2))
+        svc.close()
+        self.assertTrue(any(e.get("msg") == "pendente" for e in delivered))
+        self.assert_stopped(svc)
+
+    def test_close_during_round_never_calls_guard_after_close(self):
+        from dracaena.core import claude
+        entered = threading.Event()
+        def ask(_cfg, _text, abort, **_):
+            entered.set()
+            while not abort():
+                time.sleep(.001)
+            raise claude.Aborted()
+        svc = self.make(ask=ask, dry_run=False)
+        with mock.patch("dracaena.core.service.Guard") as guard:
+            guard.return_value.result_visible.return_value = False
+            svc.handle("toggle", {})
+            self.assertTrue(entered.wait(2))
+            svc.close()
+            guard.return_value.perform.assert_not_called()
+        self.assert_stopped(svc)
+
+    def test_timed_out_round_cannot_act_when_it_returns(self):
+        svc = self.make(asker=Asker(gate=True), dry_run=False)
+        with mock.patch("dracaena.core.service.Guard") as guard:
+            guard.return_value.result_visible.return_value = False
+            svc.handle("toggle", {})
+            self.assertTrue(self.asker.entered.wait(2))
+            start = time.monotonic()
+            svc.close(timeout=.02)
+            self.assertLess(time.monotonic() - start, .5)
+            self.asker.gate.set()
+            svc.close()
+            guard.return_value.perform.assert_not_called()
+        self.assert_stopped(svc)
+
+    def test_close_wakes_paused_worker(self):
+        svc = self.make()
+        svc.handle("toggle", {})
+        self.assertTrue(wait_for(lambda: svc.count == 1))
+        svc.handle("toggle", {})
+        svc.close()
+        self.assert_stopped(svc)
+
+
 class LiveTests(unittest.TestCase):
     """Chromium local criado na thread do laço, fixture compat servida por HTTP."""
 
@@ -442,6 +543,7 @@ class LiveTests(unittest.TestCase):
             svc = Service(config=lambda: {}, endpoint=lambda: 9, tabs=lambda _p: [{"type": "page", "url": url}],
                           playwright_factory=Live, ask=lambda *_a, **_k: (SINGLE, 0.0),
                           record_path=Path(tmp) / "revisao.jsonl")
+            self.addCleanup(svc.close)
             events = []
             svc.subscribe(events.append)
             svc.handle("ask", {})
