@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Texto sintético 1</title>
+<style>body{font:16px sans-serif;margin:24px}label,[role=option],[role=radio]{display:block;padding:8px}fieldset{padding:16px}[hidden]{display:none!important}[aria-selected=true],[aria-checked=true]{background:#cdf}</style></head><body>
+<main><section><h2 id="gx-title">Texto sintético 1</h2><div id="gx-group" role="radiogroup" aria-labelledby="gx-title"><div role="presentation"><div role="radio" aria-checked="false" tabindex="0"><span>Texto sintético 2</span></div></div><div role="presentation"><div role="radio" aria-checked="false" tabindex="0"><span>Texto sintético 3</span></div></div><div role="presentation"><div role="radio" aria-checked="false" tabindex="0"><span>Texto sintético 4</span></div></div></div></section></main><script>
+const gxGroup = document.getElementById('gx-group');
+function gxChoose(gxOption) {
+  for (const gxItem of gxGroup.querySelectorAll('[role="option"], [role="radio"]')) {
+    gxItem.setAttribute(gxItem.getAttribute('role') === 'option' ? 'aria-selected' : 'aria-checked', String(gxItem === gxOption));
+  }
+}
+gxGroup.addEventListener('click', gxEvent => {
+  const gxOption = gxEvent.target.closest('[role="option"], [role="radio"]');
+  if (gxOption) gxChoose(gxOption);
+});
+gxGroup.addEventListener('keydown', gxEvent => {
+  if (gxEvent.key === ' ' || gxEvent.key === 'Enter') {
+    const gxOption = gxEvent.target.closest('[role="option"], [role="radio"]');
+    if (gxOption) { gxEvent.preventDefault(); gxChoose(gxOption); }
+  }
+});
+</script>
+</body></html>

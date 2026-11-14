@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Texto sintético 1</title>
+<style>body{font:16px sans-serif;margin:24px}label,[role=option],[role=radio]{display:block;padding:8px}fieldset{padding:16px}[hidden]{display:none!important}[aria-selected=true],[aria-checked=true]{background:#cdf}</style></head><body>
+<main><form onsubmit="return false"><fieldset id="gx-page-1"><legend>Texto sintético 1</legend><label><input name="gx-first" type="radio" value="0">Texto sintético 2</label><label><input name="gx-first" type="radio" value="1">Texto sintético 3</label><label><input name="gx-first" type="radio" value="2">Texto sintético 4</label></fieldset><fieldset id="gx-page-2" hidden><legend>Texto sintético 5</legend><label><input name="gx-second" type="radio" value="0">Texto sintético 2</label><label><input name="gx-second" type="radio" value="1">Texto sintético 3</label><label><input name="gx-second" type="radio" value="2">Texto sintético 4</label></fieldset><button id="gx-next" type="button">Próxima</button></form></main>
+<script>
+document.getElementById('gx-next').addEventListener('click', () => {
+  document.getElementById('gx-page-1').hidden = true;
+  document.getElementById('gx-page-2').hidden = false;
+  document.getElementById('gx-next').disabled = true;
+});
+</script>
+</body></html>
