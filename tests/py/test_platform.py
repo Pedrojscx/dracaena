@@ -280,5 +280,62 @@ class InstallBrowserCommandTests(unittest.TestCase):
         self.assertIn("Sem conexão", json.loads(out.getvalue())["error"])
 
 
+class FallbackModuleAbsentTests(unittest.TestCase):
+    """Executável sem o módulo do Chromium reserva: erro em português, sem traceback e sem download."""
+
+    ABSENT = {name: None for name in ("playwright", "playwright.sync_api", "playwright._impl", "playwright._impl._driver")}
+
+    def run_main(self, argv):
+        import contextlib
+        import io
+        import sys
+        from dracaena import cli
+        out, err = io.StringIO(), io.StringIO()
+        with patch.dict(sys.modules, self.ABSENT), \
+                patch("dracaena.platform.config.load", return_value={"BROWSER_BIN": "", "BROWSER_FALLBACK": "playwright"}), \
+                patch.object(browser, "default_browser", side_effect=browser.BrowserError("ausente")), \
+                patch.object(browser.subprocess, "run") as run, patch.object(browser.subprocess, "Popen") as popen, \
+                patch("builtins.input", side_effect=AssertionError("não deve perguntar")), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(argv)
+        run.assert_not_called()
+        popen.assert_not_called()
+        return code, out.getvalue(), err.getvalue()
+
+    def test_install_browser_reports_json_error_without_traceback_or_download(self):
+        for argv in (["install-browser"], ["install-browser", "--yes"]):
+            with self.subTest(argv=argv):
+                code, out, err = self.run_main(argv)
+                self.assertNotEqual(code, 0)
+                result = json.loads(out)
+                self.assertEqual(set(result), {"ok", "error"})
+                self.assertFalse(result["ok"])
+                self.assertIn("Chromium reserva não está disponível neste executável", result["error"])
+                self.assertNotIn("Traceback", out + err)
+                self.assertNotIn("Baixando", err)
+
+    def test_library_calls_raise_browser_error(self):
+        import sys
+        with patch.dict(sys.modules, self.ABSENT), patch.object(browser.subprocess, "run") as run:
+            for call in (browser.fallback_executable, browser.install_fallback):
+                with self.subTest(call=call.__name__), self.assertRaisesRegex(browser.FallbackUnavailable, "não está disponível"):
+                    call()
+            with patch.object(browser, "default_browser", side_effect=browser.BrowserError("ausente")), \
+                    self.assertRaises(browser.FallbackUnavailable):
+                browser.resolve()
+        run.assert_not_called()
+
+    def test_doctor_does_not_suggest_download_when_module_is_absent(self):
+        import sys
+        from dracaena.platform import doctor
+        with patch.dict(sys.modules, self.ABSENT), \
+                patch("dracaena.platform.config.load", return_value={"BROWSER_BIN": "", "BROWSER_FALLBACK": "playwright"}), \
+                patch.object(browser, "default_browser", side_effect=browser.BrowserError("ausente")):
+            checks = {c["name"]: c for c in doctor.run()["checks"]}
+        self.assertFalse(checks["browser"]["ok"])
+        self.assertIn("não está disponível neste executável", checks["browser"]["message"])
+        self.assertNotIn("install-browser", checks["browser"].get("hint", ""))
+
+
 if __name__ == "__main__":
     unittest.main()
