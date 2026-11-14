@@ -54,6 +54,8 @@ def run():
         add("browser", False, str(exc),
             f"Rode 'dracaena install-browser' para baixar o Chromium reserva (cerca de {browser.FALLBACK_SIZE} em disco, com confirmação) "
             "ou informe um navegador Chromium nas configurações.")
+    except browser.FallbackUnavailable as exc:  # sem o módulo, não adianta sugerir o download
+        add("browser", False, str(exc), "Instale o Chrome ou o Chromium do sistema, ou informe o caminho em 'Navegador' (BROWSER_BIN).")
     except browser.BrowserUnsupported as exc:
         add("browser", False, str(exc),
             "Navegadores em Flatpak/Snap podem não expor o CDP: informe em 'Navegador' (BROWSER_BIN) o caminho de um "

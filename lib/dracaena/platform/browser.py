@@ -1,6 +1,7 @@
 """Chromium discovery and dedicated-profile CDP launch."""
 import configparser
 import contextlib
+import importlib
 import ipaddress
 import json
 import os
@@ -29,6 +30,10 @@ class NoBrowser(BrowserError):
 
 class FallbackMissing(BrowserError):
     """O Chromium reserva ainda não foi baixado; precisa de confirmação explícita do usuário."""
+
+
+class FallbackUnavailable(BrowserError):
+    """Esta instalação não traz o módulo do Chromium reserva; não há o que baixar."""
 
 
 BROWSERS_KEY = "PLAYWRIGHT_BROWSERS_PATH"
@@ -354,9 +359,18 @@ def _browsers_env():
             os.environ[BROWSERS_KEY] = old
 
 
+def _fallback_module(name):
+    """Importa um módulo do Playwright; a ausência dele vira erro legível, sem traceback."""
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        raise FallbackUnavailable("O Chromium reserva não está disponível neste executável. "
+                                  "Informe um navegador Chromium nas configurações (BROWSER_BIN).") from None
+
+
 def fallback_executable():
     """Caminho do Chromium reserva já baixado, ou None."""
-    from playwright.sync_api import sync_playwright
+    sync_playwright = _fallback_module("playwright.sync_api").sync_playwright
     with _browsers_env(), sync_playwright() as pw:
         candidate = pw.chromium.executable_path
     return candidate if Path(candidate).is_file() else None
@@ -379,7 +393,8 @@ def install_fallback(timeout=900):
 
     Só deve ser chamado após confirmação explícita do usuário (a CLI pergunta).
     """
-    from playwright._impl._driver import compute_driver_executable, get_driver_env
+    driver = _fallback_module("playwright._impl._driver")
+    compute_driver_executable, get_driver_env = driver.compute_driver_executable, driver.get_driver_env
     target = fallback_dir()
     try:
         private_dir(target)
