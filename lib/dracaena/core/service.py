@@ -6,9 +6,8 @@ em tela de resumo/revisão/resultado, como o runner. Toda ação passa por
 
 ``handle`` nunca espera o laço: ele roda numa thread própria (o Playwright
 síncrono fica preso à thread que o criou, então toda chamada ao navegador
-acontece lá). Antes de iniciar, ``handle`` faz uma checagem curta pelo
-endpoint HTTP do CDP local (sem Playwright) para responder ``no_browser`` ou
-``no_site`` de forma tipada.
+acontece lá). A descoberta CDP também roda nessa thread; falhas de descoberta
+são comunicadas pelo evento state com estado error.
 
 Os eventos saem numa fila única, entregue por uma thread própria: a ordem é a
 das mudanças de estado e um callback lento ou que levanta não trava o laço.
@@ -33,7 +32,7 @@ from ..platform.paths import data_dir
 from . import claude, contract
 from .errors import AdapterError, NotFound, ServiceError
 from .model import UNKNOWN, Question
-from .runner import default_record_path, record_review
+from .runner import _answers, default_record_path, record_review
 
 __all__ = ["Service", "ServiceError", "COMMANDS", "SUPPORTED_KINDS"]
 
@@ -54,15 +53,6 @@ class Step:
     status: str
     question: Question | None = None
     reason: str = ""
-
-
-def _answers(adapter, host, answer: dict):
-    """Cópia mínima de ``runner._answers`` (privada no runner): resposta -> alvos."""
-    if answer["type"] in ("SINGLE", "MULTI"):
-        return [adapter.target(host, "option", index) for index in answer["answers"]]
-    if answer["type"] == "DROPDOWN":
-        return [adapter.target(host, "dropdown", (item["item"], item["option"])) for item in answer["items"]]
-    raise contract.ContractError(f"tipo de questão não suportado: {answer['type']}")
 
 
 def default_endpoint() -> int:
@@ -222,17 +212,14 @@ class Service:
                 self._set(state="running")
                 return self.snapshot()
             # idle ou error: começa um laço novo
-            cfg = self._load_config()
-            port = self._endpoint()
-            site = self._preflight(port, contains)
             self._gen += 1
             gen, previous = self._gen, self._thread
             self._oneshot = None
-            maximum = 1 if cmd in ("ask", "once") else int(self._max_arg or cfg.get("MAX_QUESTIONS", 80))
+            maximum = 1 if cmd in ("ask", "once") else int(self._max_arg or 80)
             mode = "loop" if cmd == "toggle" else cmd
-            self._thread = threading.Thread(target=self._work, args=(gen, mode, port, contains, cfg, previous),
+            self._thread = threading.Thread(target=self._work, args=(gen, mode, contains, previous),
                                             name="dracaena-loop", daemon=True)
-            self._set(state="running", error="", count=0, maximum=maximum, site=site)
+            self._set(state="running", error="", count=0, maximum=maximum, site="")
             self._thread.start()
             return self.snapshot()
 
@@ -271,10 +258,22 @@ class Service:
         self._log(f"erro: {msg}", "error")
         self._set(gen, state="error", error=msg)
 
-    def _work(self, gen, mode, port, contains, cfg, previous) -> None:
+    def _work(self, gen, mode, contains, previous) -> None:
         if previous is not None:
             previous.join()   # um laço por vez no navegador
         try:
+            if not self._alive(gen):
+                return
+            cfg = self._load_config()
+            port = self._endpoint()
+            self._preflight(port, contains)
+            if not self._alive(gen):
+                return
+            if mode == "loop":
+                with self._lock:
+                    if gen != self._gen:
+                        return
+                    self.maximum = int(self._max_arg or cfg.get("MAX_QUESTIONS", 80))
             with self._pw() as pw:
                 browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
                 try:
