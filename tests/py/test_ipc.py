@@ -464,7 +464,7 @@ class ConfigSchemaTests(unittest.TestCase):
         schema = ask(Daemon(Simulator(), simulate=True), "config.schema")["data"]
         self.assertEqual([e["key"] for e in schema], list(config.DEFAULTS))
         for entry in schema:
-            self.assertIn(entry["type"], ("integer", "string"))
+            self.assertIn(entry["type"], ("integer", "string", "boolean"))
             self.assertEqual(entry["default"], config.DEFAULTS[entry["key"]])
             self.assertGreater(len(entry["label"]), 2)
             self.assertGreater(len(entry["description"]), 20)

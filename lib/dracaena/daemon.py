@@ -28,12 +28,26 @@ class ProbeError(Exception):
 ServiceUnavailable = ProbeError  # nome antigo, mantido por compatibilidade
 
 
+def configured_dry_run():
+    """DRY_RUN da configuração; na dúvida, modo seguro (simulação)."""
+    from .platform import config
+    try:
+        return bool(config.load().get("DRY_RUN", True))
+    except (OSError, ValueError):
+        return True
+
+
 class Simulator:
-    def __init__(self):
+    def __init__(self, dry_run=None):
         self.callbacks = []
         self.state = "idle"
         self.question = 0
         self.maximum = 80
+        self.dry_run = configured_dry_run() if dry_run is None else bool(dry_run)
+
+    def set_dry_run(self, value):
+        self.dry_run = bool(value)
+        self.emit()
 
     def subscribe(self, callback):
         self.callbacks.append(callback)
@@ -49,7 +63,7 @@ class Simulator:
 
     def snapshot(self):
         return dict(event="state", state=self.state, site="Prática simulada", question=self.question,
-                    max=self.maximum, error="")
+                    max=self.maximum, error="", dry_run=self.dry_run)
 
     def handle(self, cmd, args):
         if cmd == "status":
@@ -228,7 +242,10 @@ class Daemon:
         if cmd == "config.get":
             return config.load()
         if cmd == "config.set":
-            return config.set_value(args.get("key"), args.get("value"))
+            values = config.set_value(args.get("key"), args.get("value"))
+            if args.get("key") == "DRY_RUN" and hasattr(self.service, "set_dry_run"):
+                self.service.set_dry_run(values["DRY_RUN"])  # o serviço emite o novo state
+            return values
         if cmd == "doctor":
             from .platform.doctor import run
             return run()
