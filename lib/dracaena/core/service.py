@@ -4,10 +4,11 @@ O Service NÃO navega: marca só a questão atual, espera o humano avançar e pa
 em tela de resumo/revisão/resultado, como o runner. Toda ação passa por
 ``Guard.perform``; dry-run é o padrão.
 
-``handle`` nunca espera o laço: ele roda numa thread própria (o Playwright
+O laço roda numa thread própria (o Playwright
 síncrono fica preso à thread que o criou, então toda chamada ao navegador
 acontece lá). A descoberta CDP também roda nessa thread; falhas de descoberta
 são comunicadas pelo evento state com estado error.
+``handle`` pode esperar uma ação em curso sob o lock; veja seu contrato abaixo.
 
 Os eventos saem numa fila única, entregue por uma thread própria: a ordem é a
 das mudanças de estado e um callback lento ou que levanta não trava o laço.
@@ -122,8 +123,16 @@ class Service:
     def close(self, timeout: float = 5.0) -> None:
         """Para o trabalho e drena eventos; joins compartilham o prazo informado.
 
-        Uma dependência bloqueada pode sobreviver ao prazo, mas não poderá
-        iniciar outra ação. Uma nova chamada pode esperar seu encerramento.
+        O prazo começa na entrada, mas só limita os joins: adquirir o lock
+        não tem timeout. Se Guard.perform estiver em curso sob esse lock,
+        close espera seu término antes de marcar o serviço fechado. A guarda
+        usa frame.evaluate na checagem e element.evaluate na ação, sem timeout
+        próprio ou cancelamento em guard.py. Uma página travada pode portanto
+        bloquear close por tempo indeterminado, inclusive além de timeout.
+        A ação já iniciada não é interrompida; após marcar o fechamento,
+        nenhuma nova ação começa. Os joins usam apenas o prazo restante.
+        Outra dependência bloqueada pode sobreviver ao prazo de join; uma
+        nova chamada pode esperar seu encerramento.
         Em callback, a entrega termina depois que o próprio callback retorna.
         """
         deadline = time.monotonic() + max(0.0, timeout)
@@ -218,6 +227,14 @@ class Service:
 
     # ---- comandos
     def handle(self, cmd: str, args: dict | None = None) -> dict:
+        """Despacha comandos; descoberta e laço executam em thread própria.
+
+        Não há limite de latência ao adquirir o lock: status e stop também
+        esperam Guard.perform em curso. Sua checagem e ação usam evaluate,
+        sem timeout próprio ou cancelamento em guard.py. Uma página travada
+        pode bloquear estes comandos por tempo indeterminado. stop só muda
+        a geração após obter o lock; não cancela a ação já iniciada.
+        """
         if cmd not in COMMANDS:
             raise ServiceError("unknown_cmd", f"Comando desconhecido: {cmd}")
         args = {} if args is None else args
