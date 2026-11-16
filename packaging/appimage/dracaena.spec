@@ -7,7 +7,7 @@ sys.path.insert(0, str(root / "lib"))
 a = Analysis(
     [str(Path(SPECPATH) / "entry.py")],
     pathex=[str(root / "lib")],
-    datas=(collect_data_files("dracaena", includes=["**/*.json", "**/*.txt"])
+    datas=(collect_data_files("dracaena", includes=["**/*.json", "**/*.txt", "**/*.js"])
            + collect_data_files("playwright")),
     hiddenimports=["dracaena.platform.launcher", "playwright.sync_api", "playwright._impl._driver"],
     excludes=[ "tkinter", "PySide6", "PyQt6", "PyQt5", "PySide2"],
