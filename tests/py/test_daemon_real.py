@@ -21,7 +21,6 @@ import time
 import unittest
 from unittest.mock import patch
 
-from dracaena.core.errors import ServiceError
 from dracaena.core.service import Service
 from dracaena.daemon import Daemon
 from dracaena.platform import config, ipc
@@ -40,15 +39,9 @@ def wait_for(pred, timeout=10.0):
     return bool(pred())
 
 
-class ClosableService(Service):
-    """Service do núcleo com close(); enquanto o núcleo não traz o seu, encerra pela API pública."""
-
-    if not hasattr(Service, "close"):
-        def close(self, timeout=5.0):
-            try:
-                self.handle("stop", {})
-            except ServiceError:
-                pass
+def service_threads():
+    """Threads vivas do Service do núcleo (laço e entrega de eventos)."""
+    return {thread for thread in threading.enumerate() if thread.name.startswith("dracaena-")}
 
 
 class Asker:
@@ -258,6 +251,28 @@ class ModeSwapTests(ConfigCase):
         self.daemon.shutdown()
         self.assertEqual((self.old.stopped, self.old.closed, self.old.subs), (1, 1, []))
 
+    def start_log(self, daemon):
+        """Roda Daemon.run() com trava e socket falsos; devolve o que a partida registrou."""
+        import contextlib
+        import logging
+        listener = type("Fechado", (), {"closed": True, "close": lambda self: None})()
+        with patch("dracaena.daemon.InstanceLock", return_value=contextlib.nullcontext()), \
+                patch("dracaena.daemon.Listener", return_value=listener), \
+                self.assertLogs("dracaena", "INFO") as logs:
+            logging.getLogger("dracaena").info("início")   # assertLogs exige ao menos um registro
+            daemon.run()
+        return [(record.levelname, record.getMessage()) for record in logs.records[1:]]
+
+    def test_real_daemon_logs_its_mode_at_startup(self):
+        self.make(dry_run=True)
+        self.assertEqual(self.start_log(self.daemon), [("INFO", "Daemon real em modo simulação (DRY_RUN=true)")])
+        self.make(dry_run=False)
+        self.assertEqual(self.start_log(self.daemon), [("WARNING", "Daemon real em MODO REAL (DRY_RUN=false)")])
+
+    def test_simulator_does_not_log_a_real_mode_at_startup(self):
+        from dracaena.daemon import Simulator
+        self.assertEqual(self.start_log(Daemon(Simulator(dry_run=False), simulate=True)), [])
+
     def test_simulator_and_services_without_factory_are_not_closed(self):
         from dracaena.daemon import Simulator
         simulator = Simulator(dry_run=True)
@@ -293,6 +308,15 @@ class Subscriber:
     def kind(self, name):
         return [event for event in list(self.events) if event.get("event") == name]
 
+    def settle(self, quiet=.3, timeout=5.0):
+        """Espera a fila de eventos parar de crescer por `quiet` segundos."""
+        end = time.monotonic() + timeout
+        count, since = len(self.events), time.monotonic()
+        while time.monotonic() < end and time.monotonic() - since < quiet:
+            time.sleep(.02)
+            if len(self.events) != count:
+                count, since = len(self.events), time.monotonic()
+
     def close(self):
         try:
             self.conn.handle.shutdown(socket.SHUT_RDWR)
@@ -312,6 +336,7 @@ class RealIpcCase(ConfigCase):
         super().setUp()
         self.asker = Asker()
         self.created = []
+        self.baseline = service_threads()   # sobras de outros testes não contam
         self.daemon = Daemon(self.factory(config.load()["DRY_RUN"]), service_factory=self.factory)
         self.listener = ipc.Listener()
         self.server = threading.Thread(target=self.daemon.serve, args=(self.listener,), daemon=True)
@@ -319,16 +344,53 @@ class RealIpcCase(ConfigCase):
         self.addCleanup(self.stop_daemon)
 
     def factory(self, dry_run):
-        service = ClosableService(dry_run=dry_run, ask=self.asker, record_path=self.root / "revisao.jsonl",
+        service = Service(dry_run=dry_run, ask=self.asker, record_path=self.root / "revisao.jsonl",
                                   once_wait=1.0, **self.service_options)
         self.created.append(service)
         return service
 
+    def close_listener(self):
+        """Fecha o socket e espera o serve() sair.
+
+        Listener.close() não é seguro entre threads: o serve() acorda e fecha o mesmo socket
+        no seu finally. Em produção só uma thread fecha; aqui a segunda chamada pode perder
+        a corrida, e isso não é o que estes testes medem.
+        """
+        try:
+            self.listener.close()
+        except AttributeError:
+            pass
+        self.server.join(10)
+        self.assertFalse(self.server.is_alive())
+
     def stop_daemon(self):
         self.asker.gate.set()
-        self.listener.close()
-        self.server.join(5)
-        self.assertFalse(self.server.is_alive())
+        self.close_listener()
+
+    def own_threads(self):
+        """Threads do Service criadas por este teste que ainda estão vivas."""
+        return {thread for thread in service_threads() - self.baseline if thread.is_alive()}
+
+    def assert_swap_ends_the_old_service(self, client, old):
+        """Troca o modo e prova: threads do antigo encerradas em 5 s e nenhum evento dele nas conexões."""
+        self.assertTrue(old.flush(), "eventos do serviço antigo entregues antes da troca")
+        client.settle()   # tudo o que o antigo disse antes da troca já chegou ao cliente
+        old_threads = self.own_threads()
+        self.assertTrue(old_threads, "o serviço antigo tinha threads vivas antes da troca")
+        mark = len(client.events)
+        self.assertTrue(self.call("config.set", key="DRY_RUN", value=False)["ok"])
+        self.assertIsNot(self.daemon.service, old)
+        self.assertTrue(wait_for(lambda: not any(thread.is_alive() for thread in old_threads), 5),
+                        [thread.name for thread in old_threads if thread.is_alive()])
+        self.assertTrue(self.call("shortcut.test", arm=True)["ok"])   # marcador: evento seguinte conhecido
+        self.assertEqual(self.call("toggle")["data"], {"shortcut_test": True})
+        self.assertTrue(wait_for(lambda: client.kind("shortcut_test")), client.events)
+        time.sleep(.2)
+        # o close() do antigo emite um state próprio (dry_run true): ele não pode chegar a ninguém
+        self.assertEqual(client.events[mark:], [
+            {"event": "state", "state": "idle", "site": "", "question": 0, "max": 0, "error": "", "dry_run": False},
+            {"event": "shortcut_test", "ok": True}])
+        self.assertEqual(self.own_threads(), set(), "nenhuma thread órfã depois da troca")
 
     def subscriber(self, events=("state", "log", "question", "verdict", "shortcut_test")):
         client = Subscriber(list(events))
@@ -373,6 +435,26 @@ class RealIpcTests(RealIpcCase):
         self.assertEqual(self.asker.calls, 0)
         self.assertEqual(self.call("stop")["data"]["state"], "idle")
 
+    def test_swap_after_error_leaves_no_thread_of_the_old_service(self):
+        client = self.subscriber()
+        old = self.daemon.service
+        self.assertEqual(self.call("toggle")["data"]["state"], "running")
+        self.assertTrue(wait_for(lambda: self.state()["state"] == "error"))
+        self.assert_swap_ends_the_old_service(client, old)
+
+    def test_daemon_shutdown_leaves_no_service_thread(self):
+        client = self.subscriber()
+        self.assertEqual(self.call("toggle")["data"]["state"], "running")
+        self.assertTrue(wait_for(lambda: self.state()["state"] == "error"))
+        self.assertTrue(self.own_threads(), "havia threads do serviço antes do encerramento")
+        self.assertTrue(self.daemon.service.flush())
+        client.settle()   # o que foi dito antes do encerramento já chegou ao cliente
+        mark = len(client.events)
+        self.close_listener()
+        self.assertTrue(wait_for(lambda: not self.own_threads(), 5), [thread.name for thread in self.own_threads()])
+        time.sleep(.2)
+        self.assertEqual(client.events[mark:], [], "o serviço encerrado não fala com as conexões")
+
     def test_two_subscribers_keep_their_subscriptions_and_get_one_state_event(self):
         first, second = self.subscriber(), self.subscriber()
         old = self.daemon.service
@@ -395,10 +477,11 @@ class RunningIpcTests(RealIpcCase):
     """Laço preso na descoberta (endpoint e abas injetados), para pedir a troca com ele ativo."""
 
     def setUp(self):
-        self.release = threading.Event()
+        self.release, self.entered = threading.Event(), threading.Event()
         self.addCleanup(self.release.set)
 
         def tabs(_port):
+            self.entered.set()
             self.release.wait(10)
             return []
         self.service_options = {"endpoint": lambda: 9, "tabs": tabs}
@@ -418,6 +501,28 @@ class RunningIpcTests(RealIpcCase):
         self.assertTrue(self.call("config.set", key="DRY_RUN", value=False)["ok"], "parado, a troca é aceita")
         self.assertTrue(wait_for(lambda: client.kind("state")[-1]["dry_run"] is False), client.events)
         self.assertTrue(all(e["dry_run"] is True for e in client.kind("state")[:-1]))
+
+    def test_swap_after_start_and_stop_leaves_no_thread_of_the_old_service(self):
+        client = self.subscriber()
+        old = self.daemon.service
+        self.assertEqual(self.call("toggle")["data"]["state"], "running")
+        self.assertTrue(self.entered.wait(10), "laço iniciado e preso na descoberta")
+        self.assertTrue(self.own_threads())
+        self.assertEqual(self.call("stop")["data"]["state"], "idle")
+        self.release.set()   # a descoberta presa volta; o laço parado encerra sem agir
+        self.assertTrue(wait_for(lambda: any(e["msg"].startswith("erro:") for e in client.kind("log"))), client.events)
+        self.assertEqual(self.state()["state"], "idle", "laço parado não muda mais o estado")
+        self.assert_swap_ends_the_old_service(client, old)
+        self.assertEqual(self.asker.calls, 0)
+
+    def test_shutdown_with_the_loop_running_leaves_no_service_thread(self):
+        self.assertEqual(self.call("toggle")["data"]["state"], "running")
+        self.assertTrue(self.entered.wait(10), "laço iniciado e preso na descoberta")
+        self.assertTrue(self.own_threads())
+        self.release.set()
+        self.close_listener()
+        self.assertTrue(wait_for(lambda: not self.own_threads(), 5), [thread.name for thread in self.own_threads()])
+        self.assertEqual(self.asker.calls, 0)
 
 
 def free_port():

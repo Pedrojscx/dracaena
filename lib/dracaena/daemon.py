@@ -451,8 +451,18 @@ class Daemon:
                 self.clients.pop(conn, None)
             conn.close()
 
+    def announce_mode(self):
+        """Na partida do daemon real, registra em qual modo ele subiu (aviso quando é o modo real)."""
+        if self.service_factory is None:
+            return
+        if self.service.handle("status", {}).get("dry_run", True):
+            LOG.info("Daemon real em modo simulação (DRY_RUN=true)")
+        else:
+            LOG.warning("Daemon real em MODO REAL (DRY_RUN=false)")
+
     def run(self):
         with InstanceLock():
+            self.announce_mode()
             self.serve(Listener())
 
     def serve(self, listener):
