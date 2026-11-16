@@ -17,6 +17,7 @@ Campo ou tabela desconhecida é erro, com a linha.
 
 from __future__ import annotations
 
+import datetime
 import re
 import tomllib
 from collections.abc import Callable
@@ -52,7 +53,7 @@ _ATTR = re.compile(r"[A-Za-z_][\w:.-]{0,63}")
 _TABLE = re.compile(r"^\s*\[\s*([\w.-]+)\s*\]")
 _KEY = re.compile(r"^\s*([\w-]+)\s*=")
 _WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}")
-_DATE = re.compile(r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?Z?)?")
+_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}(:[0-9]{2})?Z?)?")
 
 
 class ProfileError(ValueError):
@@ -130,6 +131,11 @@ def _value(kind: str, value, what: str, line):
         if not isinstance(value, str) or not (_WORD if kind == WORD else _DATE).fullmatch(value):
             raise ProfileError(f"{what} precisa ser " + ("um nome curto (letras, dígitos, espaço, ponto, hífen)"
                                                          if kind == WORD else "uma data AAAA-MM-DD"), line)
+        if kind == DATE:
+            try:
+                datetime.date.fromisoformat(value[:10])
+            except ValueError:
+                raise ProfileError(f"{what} não é uma data válida", line) from None
         return value
     if kind == ATTR:
         if not isinstance(value, str) or not _ATTR.fullmatch(value):

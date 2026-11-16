@@ -87,6 +87,54 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(profile.parse(profile.dump(quoted.tables)).tables["options"]["input"], 'input[name="q"]')
 
 
+class MetaTests(unittest.TestCase):
+    """[meta] é opcional, aceita só metadados e nunca código ou ação."""
+
+    def with_meta(self, body: str):
+        return profile.parse(GOOD + "\n[meta]\n" + body + "\n")
+
+    def bad_meta(self, body: str, fragment: str):
+        with self.assertRaises(ProfileError) as ctx:
+            self.with_meta(body)
+        self.assertIn(fragment, ctx.exception.msg)
+
+    def test_absent_meta_stays_valid(self):
+        self.assertEqual(profile.parse(GOOD).meta, {})
+        self.assertEqual(profile.parse(GOOD).to_engine(), profile.parse(GOOD + "\n[meta]\nstatus = \"verified\"\n").to_engine())
+
+    def test_valid_meta_is_read(self):
+        got = self.with_meta('confidence = 0.876\nstatus = "unverified"\nfingerprint = "f1a2b3"\n'
+                             'generator = "structure 1"\ngenerated = "2026-11-16"\n')
+        self.assertEqual(got.meta, {"confidence": 0.88, "status": "unverified", "fingerprint": "f1a2b3",
+                                    "generator": "structure 1", "generated": "2026-11-16"})
+        self.assertEqual(self.with_meta('status = "experimental"\n').meta["status"], "experimental")
+
+    def test_status_and_confidence_ranges(self):
+        self.bad_meta('status = "ok"\n', "meta.status precisa ser um de")
+        for value in ("1.5", "-0.1", '"0.5"', "true", "nan"):
+            with self.subTest(value=value):
+                self.bad_meta(f"confidence = {value}\n", "meta.confidence precisa ser um número de 0 a 1")
+
+    def test_text_fields_are_short_and_plain(self):
+        self.bad_meta('fingerprint = "f<script>"\n', "meta.fingerprint precisa ser")
+        self.bad_meta('fingerprint = "f' + "a" * 40 + '"\n', "meta.fingerprint precisa ser")
+        self.bad_meta('generator = "a@b.test"\n', "meta.generator precisa ser")
+        self.bad_meta('generator = "x; alert(1)"\n', "meta.generator precisa ser")
+
+    def test_generated_must_be_a_real_date_with_ascii_digits(self):
+        self.bad_meta('generated = "2026-13-45"\n', "meta.generated não é uma data válida")
+        self.bad_meta('generated = "2026-02-30"\n', "meta.generated não é uma data válida")
+        self.bad_meta('generated = "٢٠٢٦-11-16"\n', "meta.generated precisa ser")
+
+    def test_unknown_meta_field_is_rejected(self):
+        self.bad_meta('code = "alert(1)"\n', "campo desconhecido: meta.code")
+        self.bad_meta('action = "click"\n', "campo desconhecido: meta.action")
+
+    def test_meta_is_not_an_engine_table(self):
+        self.assertNotIn("meta", profile.ENGINE_TABLES)
+        self.assertNotIn("meta", self.with_meta('status = "verified"\n').to_engine())
+
+
 class LoadTests(unittest.TestCase):
     def test_invalid_files_are_skipped_with_a_warning(self):
         with tempfile.TemporaryDirectory() as tmp:
