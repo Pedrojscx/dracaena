@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Rodada rápida</title><style>body{font:16px sans-serif;margin:24px}.sr{position:absolute;width:1px;height:1px;clip:rect(0,0,0,0);overflow:hidden}[hidden]{display:none!important}label,[role=radio],[role=option],[role=checkbox]{display:block;margin:6px 0;padding:6px}[aria-checked=true],[aria-selected=true],[aria-pressed=true]{background:#cfc}button.grande{display:block;width:320px;padding:18px;margin:8px 0;font-size:18px}td,th{padding:6px 10px}</style></head><body>
+<main><div class="progresso">Pergunta 2 de 5</div>
+<h2 id="titulo">Qual é o maior planeta do sistema solar?</h2>
+<div role="radiogroup" aria-labelledby="titulo">
+<button type="button" class="grande" role="radio" aria-checked="false">Terra</button>
+<button type="button" class="grande" role="radio" aria-checked="false">Júpiter</button>
+<button type="button" class="grande" role="radio" aria-checked="false">Saturno</button>
+<button type="button" class="grande" role="radio" aria-checked="false">Marte</button></div>
+<button type="button">Pular</button></main>
+<script>
+document.addEventListener('click', (ev) => {
+  const t = ev.composedPath().find((e) => e.getAttribute && (['radio', 'option', 'checkbox'].includes(e.getAttribute('role')) || e.hasAttribute('aria-pressed')));
+  if (!t) return;
+  const attr = t.hasAttribute('aria-pressed') ? 'aria-pressed' : t.getAttribute('role') === 'option' ? 'aria-selected' : 'aria-checked';
+  const group = t.parentElement;
+  const multi = t.getAttribute('role') === 'checkbox' || group.getAttribute('aria-multiselectable') === 'true';
+  if (multi) { t.setAttribute(attr, t.getAttribute(attr) === 'true' ? 'false' : 'true'); return; }
+  for (const e of group.children) if (e.hasAttribute(attr)) e.setAttribute(attr, 'false');
+  t.setAttribute(attr, 'true');
+}, true);
+</script></body></html>

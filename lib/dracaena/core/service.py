@@ -4,11 +4,11 @@ O Service NÃO navega: marca só a questão atual, espera o humano avançar e pa
 em tela de resumo/revisão/resultado, como o runner. Toda ação passa por
 ``Guard.perform``; dry-run é o padrão.
 
-``handle`` nunca espera o laço: ele roda numa thread própria (o Playwright
+O laço roda numa thread própria (o Playwright
 síncrono fica preso à thread que o criou, então toda chamada ao navegador
-acontece lá). Antes de iniciar, ``handle`` faz uma checagem curta pelo
-endpoint HTTP do CDP local (sem Playwright) para responder ``no_browser`` ou
-``no_site`` de forma tipada.
+acontece lá). A descoberta CDP também roda nessa thread; falhas de descoberta
+são comunicadas pelo evento state com estado error.
+``handle`` pode esperar uma ação em curso sob o lock; veja seu contrato abaixo.
 
 Os eventos saem numa fila única, entregue por uma thread própria: a ordem é a
 das mudanças de estado e um callback lento ou que levanta não trava o laço.
@@ -33,7 +33,7 @@ from ..platform.paths import data_dir
 from . import claude, contract
 from .errors import AdapterError, NotFound, ServiceError
 from .model import UNKNOWN, Question
-from .runner import default_record_path, record_review
+from .runner import _answers, default_record_path, record_review
 
 __all__ = ["Service", "ServiceError", "COMMANDS", "SUPPORTED_KINDS"]
 
@@ -42,6 +42,7 @@ COMMANDS = ("status", "toggle", "stop", "ask", "once")
 SUPPORTED_KINDS = ("SINGLE", "MULTI", "DROPDOWN")
 ONCE_WAIT_SECONDS = 180.0   # igual ao --espera padrão do runner
 POLL_SECONDS = 0.2
+_END_EVENTS = object()
 
 
 @dataclass(frozen=True)
@@ -54,15 +55,6 @@ class Step:
     status: str
     question: Question | None = None
     reason: str = ""
-
-
-def _answers(adapter, host, answer: dict):
-    """Cópia mínima de ``runner._answers`` (privada no runner): resposta -> alvos."""
-    if answer["type"] in ("SINGLE", "MULTI"):
-        return [adapter.target(host, "option", index) for index in answer["answers"]]
-    if answer["type"] == "DROPDOWN":
-        return [adapter.target(host, "dropdown", (item["item"], item["option"])) for item in answer["items"]]
-    raise contract.ContractError(f"tipo de questão não suportado: {answer['type']}")
 
 
 def default_endpoint() -> int:
@@ -120,6 +112,7 @@ class Service:
         self._cond = threading.Condition(self._lock)
         self.state, self.site, self.error = "idle", "", ""
         self.count, self.maximum = 0, int(max_questions or 0)
+        self._closed = False
         self._gen = 0              # geração do laço atual; laço de geração antiga não muda nada
         self._oneshot = None       # "ask" | "once" pedido com o laço pausado
         self._thread: threading.Thread | None = None
@@ -127,9 +120,40 @@ class Service:
         self._events: queue.Queue = queue.Queue()
         self._dispatcher: threading.Thread | None = None
 
+    def close(self, timeout: float = 5.0) -> None:
+        """Para o trabalho e drena eventos; joins compartilham o prazo informado.
+
+        O prazo começa na entrada, mas só limita os joins: adquirir o lock
+        não tem timeout. Se Guard.perform estiver em curso sob esse lock,
+        close espera seu término antes de marcar o serviço fechado. A guarda
+        usa frame.evaluate na checagem e element.evaluate na ação, sem timeout
+        próprio ou cancelamento em guard.py. Uma página travada pode portanto
+        bloquear close por tempo indeterminado, inclusive além de timeout.
+        A ação já iniciada não é interrompida; após marcar o fechamento,
+        nenhuma nova ação começa. Os joins usam apenas o prazo restante.
+        Outra dependência bloqueada pode sobreviver ao prazo de join; uma
+        nova chamada pode esperar seu encerramento.
+        Em callback, a entrega termina depois que o próprio callback retorna.
+        """
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._lock:
+            if not self._closed:
+                self._gen += 1
+                self._oneshot = None
+                self._set(state="idle", error="")
+                self._closed = True
+                self._events.put(_END_EVENTS)
+            worker, dispatcher = self._thread, self._dispatcher
+        current = threading.current_thread()
+        for thread in (worker, dispatcher):
+            if thread is not None and thread is not current:
+                thread.join(max(0.0, deadline - time.monotonic()))
+
     # ---- eventos
     def subscribe(self, cb: Callable[[dict], None]) -> Callable[[], None]:
         with self._lock:
+            if self._closed:
+                raise ServiceError("bad_state", "O serviço já foi fechado.")
             self._subs.append(cb)
 
         def unsubscribe():
@@ -140,6 +164,8 @@ class Service:
 
     def _emit(self, event: dict) -> None:
         with self._lock:
+            if self._closed:
+                return
             self._events.put(event)
             if self._dispatcher is None:
                 self._dispatcher = threading.Thread(target=self._deliver, name="dracaena-events", daemon=True)
@@ -148,6 +174,10 @@ class Service:
     def _deliver(self) -> None:
         while True:
             event = self._events.get()
+            if event is _END_EVENTS:
+                with self._lock:
+                    self._subs.clear()
+                return
             if isinstance(event, threading.Event):
                 event.set()
                 continue
@@ -162,7 +192,16 @@ class Service:
     def flush(self, timeout: float = 5.0) -> bool:
         """Espera a entrega dos eventos já emitidos (útil em testes)."""
         done = threading.Event()
-        self._emit(done)
+        with self._lock:
+            if threading.current_thread() is self._dispatcher:
+                return False
+            closed, dispatcher = self._closed, self._dispatcher
+            if not closed:
+                self._emit(done)
+        if closed:
+            if dispatcher is not None:
+                dispatcher.join(timeout)
+            return dispatcher is None or not dispatcher.is_alive()
         return done.wait(timeout)
 
     def _log(self, msg: str, level: str = "info") -> None:
@@ -178,7 +217,7 @@ class Service:
     def _set(self, gen: int | None = None, **changes) -> bool:
         """Muda o estado e emite ``state``; com ``gen``, só se o laço ainda for o atual."""
         with self._lock:
-            if gen is not None and gen != self._gen:
+            if self._closed or (gen is not None and gen != self._gen):
                 return False
             for key, val in changes.items():
                 setattr(self, key, val)
@@ -188,6 +227,14 @@ class Service:
 
     # ---- comandos
     def handle(self, cmd: str, args: dict | None = None) -> dict:
+        """Despacha comandos; descoberta e laço executam em thread própria.
+
+        Não há limite de latência ao adquirir o lock: status e stop também
+        esperam Guard.perform em curso. Sua checagem e ação usam evaluate,
+        sem timeout próprio ou cancelamento em guard.py. Uma página travada
+        pode bloquear estes comandos por tempo indeterminado. stop só muda
+        a geração após obter o lock; não cancela a ação já iniciada.
+        """
         if cmd not in COMMANDS:
             raise ServiceError("unknown_cmd", f"Comando desconhecido: {cmd}")
         args = {} if args is None else args
@@ -200,6 +247,8 @@ class Service:
             state = self.state
             if cmd == "status":
                 return self.snapshot()
+            if self._closed:
+                raise ServiceError("bad_state", "O serviço já foi fechado.")
             if cmd == "stop":
                 if state == "idle":
                     raise ServiceError("bad_state", "Nada em execução para parar")
@@ -222,17 +271,14 @@ class Service:
                 self._set(state="running")
                 return self.snapshot()
             # idle ou error: começa um laço novo
-            cfg = self._load_config()
-            port = self._endpoint()
-            site = self._preflight(port, contains)
             self._gen += 1
             gen, previous = self._gen, self._thread
             self._oneshot = None
-            maximum = 1 if cmd in ("ask", "once") else int(self._max_arg or cfg.get("MAX_QUESTIONS", 80))
+            maximum = 1 if cmd in ("ask", "once") else int(self._max_arg or 80)
             mode = "loop" if cmd == "toggle" else cmd
-            self._thread = threading.Thread(target=self._work, args=(gen, mode, port, contains, cfg, previous),
+            self._thread = threading.Thread(target=self._work, args=(gen, mode, contains, previous),
                                             name="dracaena-loop", daemon=True)
-            self._set(state="running", error="", count=0, maximum=maximum, site=site)
+            self._set(state="running", error="", count=0, maximum=maximum, site="")
             self._thread.start()
             return self.snapshot()
 
@@ -260,7 +306,7 @@ class Service:
     # ---- laço (thread própria)
     def _alive(self, gen: int) -> bool:
         with self._lock:
-            return gen == self._gen
+            return not self._closed and gen == self._gen
 
     def _pausing(self, gen: int, shot: str | None) -> bool:
         """Interromper a espera: laço parado, pausa pedida ou um ask/once novo com o laço pausado."""
@@ -271,10 +317,22 @@ class Service:
         self._log(f"erro: {msg}", "error")
         self._set(gen, state="error", error=msg)
 
-    def _work(self, gen, mode, port, contains, cfg, previous) -> None:
+    def _work(self, gen, mode, contains, previous) -> None:
         if previous is not None:
             previous.join()   # um laço por vez no navegador
         try:
+            if not self._alive(gen):
+                return
+            cfg = self._load_config()
+            port = self._endpoint()
+            self._preflight(port, contains)
+            if not self._alive(gen):
+                return
+            if mode == "loop":
+                with self._lock:
+                    if gen != self._gen:
+                        return
+                    self.maximum = int(self._max_arg or cfg.get("MAX_QUESTIONS", 80))
             with self._pw() as pw:
                 browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
                 try:
@@ -422,10 +480,13 @@ class Service:
         guard.bind(frame, host, question.id)
         try:
             for target in _answers(adapter, host, answer):
-                if not self._alive(gen):
-                    log("parada: interrompido antes de agir")
-                    return Step("interrupted", question)
-                guard.perform(target, target.label)
+                # Serializa o início da ação com close: não há intervalo entre
+                # conferir a geração e entregar o alvo à única porta de ação.
+                with self._lock:
+                    if not self._alive(gen):
+                        log("parada: interrompido antes de agir")
+                        return Step("interrupted", question)
+                    guard.perform(target, target.label)
         except ResultScreen:
             log("parada: fim da atividade")
             return Step("end", question)

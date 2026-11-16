@@ -1,0 +1,455 @@
+{
+  "fixtures": [
+    {
+      "file": "radio_rotulos.html",
+      "root": "generic",
+      "pattern": "Radio em fieldset e legend",
+      "delta": "Rótulos externos por for/id dentro de um fieldset isolado; corpus usa rótulos envolventes.",
+      "expected_type": "SINGLE",
+      "alternatives": 3,
+      "shadow": false,
+      "iframe": false,
+      "expected_count": null,
+      "observed": {
+        "heuristic": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "SINGLE",
+              "alternatives": 3,
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": null
+            }
+          ],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "SINGLE",
+              "alternatives": 3,
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": 0.99
+            }
+          ],
+          "errors": []
+        }
+      }
+    },
+    {
+      "file": "checkbox_contagem.html",
+      "root": "generic",
+      "pattern": "Checkbox com contagem no enunciado",
+      "delta": "Cinco opções, contagem três e rótulos externos; corpus usa contagem duas.",
+      "expected_type": "MULTI",
+      "alternatives": 5,
+      "shadow": false,
+      "iframe": false,
+      "expected_count": 3,
+      "observed": {
+        "heuristic": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "MULTI",
+              "alternatives": 5,
+              "expected_count": 3,
+              "stem_present": true,
+              "confidence": null
+            }
+          ],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "MULTI",
+              "alternatives": 5,
+              "expected_count": 3,
+              "stem_present": true,
+              "confidence": 0.99
+            }
+          ],
+          "errors": []
+        }
+      }
+    },
+    {
+      "file": "select_unico.html",
+      "root": "generic",
+      "pattern": "Select nativo único",
+      "delta": "Uma lacuna isolada com placeholder desabilitado; corpus contém conjuntos de selects.",
+      "expected_type": "DROPDOWN",
+      "alternatives": [
+        3
+      ],
+      "shadow": false,
+      "iframe": false,
+      "expected_count": null,
+      "observed": {
+        "heuristic": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "DROPDOWN",
+              "alternatives": [
+                3
+              ],
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": null
+            }
+          ],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "DROPDOWN",
+              "alternatives": [
+                3
+              ],
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": 0.99
+            }
+          ],
+          "errors": []
+        }
+      }
+    },
+    {
+      "file": "selects_frase.html",
+      "root": "generic",
+      "pattern": "Vários selects em frase",
+      "delta": "Três lacunas com cardinalidades distintas e placeholders desabilitados; corpus tem duas.",
+      "expected_type": "DROPDOWN",
+      "alternatives": [
+        2,
+        3,
+        4
+      ],
+      "shadow": false,
+      "iframe": false,
+      "expected_count": null,
+      "observed": {
+        "heuristic": {
+          "status": "parcial",
+          "questions": [
+            {
+              "kind": "DROPDOWN",
+              "alternatives": [
+                2
+              ],
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": null
+            }
+          ],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "DROPDOWN",
+              "alternatives": [
+                2,
+                3,
+                4
+              ],
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": 0.95
+            }
+          ],
+          "errors": []
+        }
+      }
+    },
+    {
+      "file": "lista_aninhada.html",
+      "root": "generic",
+      "pattern": "listbox ARIA selecionável",
+      "delta": "Opções em wrappers de apresentação, com seleção por clique ou teclado; corpus usa filhos diretos.",
+      "expected_type": "SINGLE",
+      "alternatives": 3,
+      "shadow": false,
+      "iframe": false,
+      "expected_count": null,
+      "observed": {
+        "heuristic": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "SINGLE",
+              "alternatives": 3,
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": null
+            }
+          ],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "SINGLE",
+              "alternatives": 3,
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": 0.99
+            }
+          ],
+          "errors": []
+        }
+      }
+    },
+    {
+      "file": "radio_aria.html",
+      "root": "generic",
+      "pattern": "radiogroup ARIA selecionável",
+      "delta": "Radios ARIA em divs com spans e wrappers; corpus usa botões.",
+      "expected_type": "SINGLE",
+      "alternatives": 3,
+      "shadow": false,
+      "iframe": false,
+      "expected_count": null,
+      "observed": {
+        "heuristic": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "SINGLE",
+              "alternatives": 3,
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": null
+            }
+          ],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "SINGLE",
+              "alternatives": 3,
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": 0.99
+            }
+          ],
+          "errors": []
+        }
+      }
+    },
+    {
+      "file": "shadow_aninhado.html",
+      "root": "generic",
+      "pattern": "Shadow DOM aberto aninhado",
+      "delta": "Dois níveis de shadow roots; corpus contém componentes irmãos com um nível.",
+      "expected_type": "SINGLE",
+      "alternatives": 3,
+      "shadow": true,
+      "iframe": false,
+      "expected_count": null,
+      "observed": {
+        "heuristic": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "SINGLE",
+              "alternatives": 3,
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": null
+            }
+          ],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "SINGLE",
+              "alternatives": 3,
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": 0.99
+            }
+          ],
+          "errors": []
+        }
+      }
+    },
+    {
+      "file": "quadro_srcdoc.html",
+      "root": "generic",
+      "pattern": "Questão em iframe srcdoc",
+      "delta": "Documento inline; corpus carrega um arquivo separado por src.",
+      "expected_type": "SINGLE",
+      "alternatives": 3,
+      "shadow": false,
+      "iframe": true,
+      "expected_count": null,
+      "observed": {
+        "heuristic": {
+          "status": "falha",
+          "questions": [],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "SINGLE",
+              "alternatives": 3,
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": 0.99
+            }
+          ],
+          "errors": []
+        }
+      }
+    },
+    {
+      "file": "paginas_locais.html",
+      "root": "generic",
+      "pattern": "Formulário paginado com Próxima",
+      "delta": "Troca local de fieldsets e exclusão da questão oculta; corpus tem apenas a tela estática de navegação.",
+      "expected_type": "SINGLE",
+      "alternatives": 3,
+      "shadow": false,
+      "iframe": false,
+      "expected_count": null,
+      "observed": {
+        "heuristic": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "SINGLE",
+              "alternatives": 3,
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": null
+            }
+          ],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [
+            {
+              "kind": "SINGLE",
+              "alternatives": 3,
+              "expected_count": null,
+              "stem_present": true,
+              "confidence": 0.99
+            }
+          ],
+          "errors": []
+        }
+      }
+    },
+    {
+      "file": "resumo_leitura.html",
+      "root": "generic",
+      "pattern": "Resultado e resumo somente leitura",
+      "delta": "Resumo sem botões, nota ou envio; corpus contém resumo com ações globais.",
+      "expected_type": "não suportado",
+      "alternatives": 0,
+      "shadow": false,
+      "iframe": false,
+      "expected_count": null,
+      "observed": {
+        "heuristic": {
+          "status": "ok",
+          "questions": [],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [],
+          "errors": []
+        }
+      }
+    },
+    {
+      "file": "botoes_neutros.html",
+      "root": "generic",
+      "pattern": "Botões sem papel ou estado",
+      "delta": "Grade com botões dentro de wrappers, sem semântica de seleção; variante negativa estrutural.",
+      "expected_type": "não suportado",
+      "alternatives": 3,
+      "shadow": false,
+      "iframe": false,
+      "expected_count": null,
+      "observed": {
+        "heuristic": {
+          "status": "ok",
+          "questions": [],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [],
+          "errors": []
+        }
+      }
+    },
+    {
+      "file": "campo_editavel.html",
+      "root": "generic",
+      "pattern": "Campo de digitar editável",
+      "delta": "Editor contenteditable; corpus usa input de texto.",
+      "expected_type": "não suportado",
+      "alternatives": 0,
+      "shadow": false,
+      "iframe": false,
+      "expected_count": null,
+      "observed": {
+        "heuristic": {
+          "status": "ok",
+          "questions": [],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [],
+          "errors": []
+        }
+      }
+    },
+    {
+      "file": "arraste_regioes.html",
+      "root": "generic",
+      "pattern": "Arrastar entre regiões",
+      "delta": "Elemento arrastável em grade e região de destino; corpus usa lista ordenável.",
+      "expected_type": "não suportado",
+      "alternatives": 1,
+      "shadow": false,
+      "iframe": false,
+      "expected_count": null,
+      "observed": {
+        "heuristic": {
+          "status": "ok",
+          "questions": [],
+          "errors": []
+        },
+        "general": {
+          "status": "ok",
+          "questions": [],
+          "errors": []
+        }
+      }
+    }
+  ]
+}

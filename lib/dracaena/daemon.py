@@ -1,4 +1,9 @@
-"""Servidor IPC v0 local e simulador determinístico do núcleo."""
+"""Servidor IPC v0 local: liga o Service do núcleo (ou o simulador determinístico) aos clientes.
+
+O daemon nunca age por conta própria: não abre navegador nem tenta conexão; só
+repassa pedidos IPC ao Service, que decide tudo o que toca a página pela guarda.
+Em Windows só existe o caminho de pipe nomeado, NÃO VALIDADO em Windows real.
+"""
 import logging
 import threading
 import time
@@ -35,6 +40,18 @@ def configured_dry_run():
         return bool(config.load().get("DRY_RUN", True))
     except (OSError, ValueError):
         return True
+
+
+def real_service(dry_run=True):
+    """Service do núcleo. Só constrói: nada de navegador nem de conexão até um pedido IPC."""
+    from .core.service import Service
+    return Service(dry_run=bool(dry_run))
+
+
+class StateError(Exception):
+    """Pedido recusado pelo estado atual do laço (código IPC bad_state)."""
+
+    code = "bad_state"
 
 
 class Simulator:
@@ -211,9 +228,10 @@ class Subscription:
 
 
 class Daemon:
-    def __init__(self, service, simulate=False, clock=time.monotonic, probe_step=0.2):
+    def __init__(self, service, simulate=False, clock=time.monotonic, probe_step=0.2, service_factory=None):
         self.simulate = simulate
         self.service = service
+        self.service_factory = service_factory  # dry_run -> Service novo; usado só em config.set DRY_RUN
         self.clock = clock
         self.armed_until = None
         self.shortcut_lock = threading.Lock()
@@ -221,7 +239,14 @@ class Daemon:
         self.clients = {}
         self.lock = threading.RLock()
         self.client_lock = threading.RLock()
-        self.unsubscribe = service.subscribe(self.emit) if hasattr(service, "subscribe") else None
+        self.unsubscribe = service.subscribe(self.listener(service)) if hasattr(service, "subscribe") else None
+
+    def listener(self, service):
+        """Callback de eventos preso a um serviço: depois da troca, o antigo não fala mais."""
+        def deliver(event):
+            if self.service is service:
+                self.emit(event)
+        return deliver
 
     def emit(self, event):
         with self.client_lock:
@@ -242,6 +267,9 @@ class Daemon:
         if cmd == "config.get":
             return config.load()
         if cmd == "config.set":
+            if (args.get("key") == "DRY_RUN" and self.service_factory is not None
+                    and not hasattr(self.service, "set_dry_run")):
+                return self.replace_service(args.get("value"))
             values = config.set_value(args.get("key"), args.get("value"))
             if args.get("key") == "DRY_RUN" and hasattr(self.service, "set_dry_run"):
                 self.service.set_dry_run(values["DRY_RUN"])  # o serviço emite o novo state
@@ -260,6 +288,66 @@ class Daemon:
             return save(args.get("name"), args.get("toml"), args.get("overwrite", False), write=not self.simulate,
                         existing=[site["slug"] for site in SIMULATED_SITES])
         raise ValueError("Comando de plataforma desconhecido")
+
+    def replace_service(self, value):
+        """config.set DRY_RUN no daemon real: o Service não muda de modo, então é recriado.
+
+        Chamado sob ``self.lock`` (nenhum outro comando do serviço roda no meio). Só troca com
+        o laço em idle ou error. A gravação da configuração é o último passo que pode falhar:
+        qualquer falha antes dela deixa configuração e serviço no modo anterior.
+        """
+        from .platform import config
+        config.validate("DRY_RUN", value)
+        old = self.service
+        snapshot = old.handle("status", {})
+        if bool(snapshot.get("dry_run", True)) == value:
+            return config.set_value("DRY_RUN", value)  # mesmo modo: só confirma a configuração
+        if snapshot.get("state") not in ("idle", "error"):
+            raise StateError("Pare o laço (stop) antes de mudar o modo simulação.")
+        new = self.service_factory(value)
+        if bool(new.handle("status", {}).get("dry_run", True)) != value:
+            self.discard(new)
+            raise RuntimeError("o serviço novo não assumiu o modo pedido")
+        unsubscribe = new.subscribe(self.listener(new))
+        try:
+            values = config.set_value("DRY_RUN", value)
+        except BaseException:
+            unsubscribe()
+            self.discard(new)
+            raise
+        old_unsubscribe, self.unsubscribe = self.unsubscribe, unsubscribe
+        self.service = new  # daqui em diante o antigo está mudo (ver listener)
+        if old_unsubscribe:
+            try:
+                old_unsubscribe()
+            except Exception:
+                LOG.exception("Falha ao cancelar a assinatura do serviço anterior")
+        self.discard(old)
+        if not value:
+            LOG.warning("Modo real ativado por config.set DRY_RUN=false")
+        self.emit({**new.handle("status", {}), "event": "state"})
+        return values
+
+    @staticmethod
+    def discard(service):
+        """Encerra de verdade um serviço que sai de uso (laço e entrega de eventos)."""
+        try:
+            service.close()
+        except Exception:
+            LOG.exception("Falha ao encerrar o serviço anterior")
+
+    def shutdown(self):
+        """Fim do daemon: cancela a assinatura; no daemon real, antes para o laço e depois encerra o serviço."""
+        if self.service_factory is not None:
+            try:
+                if self.service.handle("status", {}).get("state") != "idle":
+                    self.service.handle("stop", {})
+            except Exception:
+                LOG.exception("Falha ao parar o laço no encerramento")
+        if self.unsubscribe:
+            self.unsubscribe()
+        if self.service_factory is not None:  # só o daemon real é dono do ciclo de vida do serviço
+            self.discard(self.service)
 
     def dispatch(self, request, conn):
         if not isinstance(request, dict):
@@ -363,8 +451,18 @@ class Daemon:
                 self.clients.pop(conn, None)
             conn.close()
 
+    def announce_mode(self):
+        """Na partida do daemon real, registra em qual modo ele subiu (aviso quando é o modo real)."""
+        if self.service_factory is None:
+            return
+        if self.service.handle("status", {}).get("dry_run", True):
+            LOG.info("Daemon real em modo simulação (DRY_RUN=true)")
+        else:
+            LOG.warning("Daemon real em MODO REAL (DRY_RUN=false)")
+
     def run(self):
         with InstanceLock():
+            self.announce_mode()
             self.serve(Listener())
 
     def serve(self, listener):
@@ -386,5 +484,4 @@ class Daemon:
                 threading.Thread(target=self.client, args=(conn,), daemon=True).start()
         finally:
             listener.close()
-            if self.unsubscribe:
-                self.unsubscribe()
+            self.shutdown()
