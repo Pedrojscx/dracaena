@@ -10,7 +10,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update >&2
 apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils \
   libssl-dev zlib1g-dev libffi-dev libbz2-dev liblzma-dev libsqlite3-dev \
-  libreadline-dev libncurses-dev libgdbm-dev uuid-dev file desktop-file-utils >&2
+  libreadline-dev libncurses-dev libgdbm-dev uuid-dev file desktop-file-utils squashfs-tools >&2
 WORK=$(mktemp -d /tmp/dracaena-build.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 fetch() {
@@ -33,9 +33,15 @@ PY="$WORK/python/bin/python3.12"
 "$PY" -c 'import PyInstaller; assert PyInstaller.__version__ == "6.22.3"'
 fetch https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage \
   "$WORK/appimagetool" ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
-fetch https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64 \
-  "$WORK/runtime" 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+fetch https://github.com/AppImage/AppImageKit/releases/download/13/obsolete-runtime-x86_64 \
+  "$WORK/runtime" 328e0d745c5c6817048c27bc3e8314871703f8f47ffa81a37cb06cd95a94b323
 chmod +x "$WORK/appimagetool"
+# O compressor embutido só aceita zstd; usar o compressor autenticado do sistema.
+mkdir "$WORK/tool"
+(cd "$WORK/tool" && "$WORK/appimagetool" --appimage-extract >/dev/null)
+mapfile -t compressors < <(find "$WORK/tool/squashfs-root" -type f -name mksquashfs)
+[[ ${#compressors[@]} -eq 1 ]] || { echo 'Compressor do empacotador não localizado' >&2; exit 2; }
+cp /usr/bin/mksquashfs "${compressors[0]}"
 cd "$ROOT"
 "$PY" -m PyInstaller --noconfirm --clean --distpath "$WORK/dist" \
   --workpath "$WORK/freeze" packaging/appimage/dracaena.spec >&2
@@ -46,8 +52,8 @@ cp packaging/appimage/{AppRun,dracaena.desktop,dracaena.svg} "$APPDIR/"
 chmod +x "$APPDIR/AppRun"
 ln -s dracaena.svg "$APPDIR/.DirIcon"
 desktop-file-validate "$APPDIR/dracaena.desktop"
-ARCH=x86_64 "$WORK/appimagetool" --appimage-extract-and-run \
-  --runtime-file "$WORK/runtime" "$APPDIR" "$OUT_DIR/dracaena-x86_64.AppImage" >&2
+ARCH=x86_64 "$WORK/tool/squashfs-root/AppRun" \
+  --comp xz --runtime-file "$WORK/runtime" "$APPDIR" "$OUT_DIR/dracaena-x86_64.AppImage" >&2
 find "$APPDIR/usr/bin" -type f -printf '%s %P\n' | sort -nr > "$OUT_DIR/bundled-sizes.txt"
 "$PY" -m pip freeze > "$OUT_DIR/build-packages.txt"
 sha256sum "$OUT_DIR/dracaena-x86_64.AppImage" >&2

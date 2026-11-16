@@ -11,8 +11,8 @@ o entry point `dracaena.cli:main`, sem alterar a aplicação.
 
 Python e appimagetool têm SHA-256 fixado; PyInstaller e suas dependências têm
 versão e SHA-256 fixados em `requirements-build.txt`, inclusive transitivas.
-O pip exige hashes e aceita somente wheels. O runtime 20251108 também tem hash fixado, evitando o
-download implícito de um runtime variável pelo appimagetool. Fontes: python.org,
+O pip exige hashes e aceita somente wheels. O runtime AppImageKit 13 também tem hash
+fixo, o que impede o download implícito de um runtime variável pelo appimagetool. Fontes: python.org,
 pypi.org e releases oficiais AppImage. Os pacotes do sistema e a imagem
 ubuntu:22.04 recebem atualizações; o `apt-get` não é fixado por versão ou snapshot.
 Este build não promete identidade bit a bit.
@@ -30,23 +30,26 @@ AppRun fora do AppDir não é resolvido (não há `readlink`); defina `APPDIR`.
 No modo FUSE o runtime precisa de `fusermount` no PATH; sem ele, use
 `APPIMAGE_EXTRACT_AND_RUN=1`.
 
-Playwright é importado apenas no fallback do navegador e fica excluído (zero
-bytes do driver). Não entram navegador, Qt ou bandeja. `doctor` trata a ausência
-do fallback como diagnóstico; pode retornar 1 por dependências externas ausentes.
-Dependências locais incluídas: platformdirs e psutil. Recursos JSON/TXT existentes
-no pacote entram como dados. Não se instala o projeto via pip para evitar baixar
-as dependências gráficas/de navegador fora do escopo.
+Playwright 1.64.1, seu driver e dependências entram no pacote, com versões e
+SHA-256 fixados. O squashfs usa compressão xz. Como o compressor embutido no empacotador
+só aceita zstd, o build extrai a ferramenta verificada e substitui seu
+`mksquashfs` pelo pacote autenticado `squashfs-tools` da distribuição. O navegador não é embutido:
+`./dracaena-x86_64.AppImage install-browser --yes` baixa o Chromium reserva
+para a pasta de dados do usuário; sem `--yes`, exige confirmação interativa.
+Não entram Qt ou bandeja. `doctor` pode retornar 1 por dependências externas
+ausentes. Recursos JSON/TXT do pacote entram como dados. O projeto não é
+instalado via pip: o build seleciona suas dependências explicitamente.
 
 Saídas adicionais: `bundled-sizes.txt` (bytes por arquivo, maior primeiro) e
 `build-packages.txt` (versões do ambiente de congelamento).
 
 Verificação independente pertence a `verify.sh`, entregue separadamente.
 Para rodar sem FUSE, use `APPIMAGE_EXTRACT_AND_RUN=1`.
-O runtime deixa `/tmp/appimage_extracted_<hash>` após
-`--appimage-extract-and-run` (aproximadamente 51 MiB por extração). Ele respeita
-`TMPDIR`: defina-o para direcionar esse diretório a outro local. O diretório
-persiste após a saída; considere esse consumo ao usar o modo sem FUSE.
-Com a base 5844b3a, `--help` lista os dez subcomandos e `--version` está
+No modo `--appimage-extract-and-run` o runtime extrai o pacote para um diretório
+temporário, que respeita `TMPDIR`. Na medição do runtime 13 (`--version`) nenhum
+`appimage_extracted_*` ficou em `TMPDIR` após a saída; esse comportamento não é
+garantido pelo formato e o `check-cases.py` o registra apenas como informação.
+Com a base a54cd96, `--help` lista os dez subcomandos e `--version` está
 disponível. O daemon real permanece indisponível; use `--simulate` para prática.
 
 ## Requisitos e resíduos
@@ -55,19 +58,30 @@ disponível. O daemon real permanece indisponível; use `--simulate` para práti
   símbolo exigido pelos binários do pacote é `GLIBC_2.35` (medido com `objdump -T`).
   Distribuições com glibc mais velha não são suportadas.
 - **Sem FUSE:** `--appimage-extract-and-run` (ou `APPIMAGE_EXTRACT_AND_RUN=1`) extrai o
-  pacote para `$TMPDIR/appimage_extracted_<hash>` (padrão `/tmp`), cerca de 51 MiB.
-  O diretório **não é apagado** na saída. Apague-o à mão ou defina `TMPDIR`
-  para um local que você limpe.
+  pacote em um diretório temporário sob `TMPDIR` (padrão `/tmp`). O pacote com driver ocupa mais espaço que os 51 MiB da versão anterior. Veja a seção de extração acima sobre resíduos.
 - **python-xlib** (atalho global X11) fica fora do AppImage da fase 1. Ele vem de
   `requirements.txt` só para a UI. O build usa `requirements-build.txt`, que não o lista,
   e o pacote não tem arquivos `xlib`.
 
-## Verificação dos 12 casos
+## Verificação dos 16 casos
 
 Da raiz do repositório, depois do build:
 
     python3 -I packaging/appimage/check-cases.py [arquivo.AppImage]
 
-O script roda `--help`, `--version` e `doctor` com `env -i`, em FUSE e em
+O script roda `--help`, `--version`, `doctor` e `install-browser` com `env -i`, em FUSE e em
 `--appimage-extract-and-run`, direto e por link simbólico. Ele imprime o HEAD e o
-SHA-256 do artefato verificado e sai com 0 só se os 12 casos passarem.
+SHA-256 do artefato verificado e sai com 0 só se os 16 casos passarem.
+
+O caso `install-browser` roda sem entrada e sem `--yes`: deve devolver JSON de
+confirmação pendente, provando que o driver inicializou sem baixar o navegador.
+O download e a abertura do Chromium exigem um teste separado com as bibliotecas
+de desktop instaladas. Incluir o driver não inclui essas bibliotecas do sistema.
+
+## Runtime xz
+
+O runtime de 20251108 não lê squashfs com xz. Este build usa o runtime oficial
+AppImageKit 13, com SHA-256 fixo. O modo FUSE precisa de libfuse2 no Ubuntu 22.04
+ou libfuse2t64 no Ubuntu 24.04. Sem FUSE, use `--appimage-extract-and-run`.
+O runtime é mais antigo; as verificações no Ubuntu cobrem extração e o daemon
+simulado. Elas não provam que o daemon real nem uma sessão de navegador funcionam.

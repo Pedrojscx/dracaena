@@ -7,9 +7,10 @@ sys.path.insert(0, str(root / "lib"))
 a = Analysis(
     [str(Path(SPECPATH) / "entry.py")],
     pathex=[str(root / "lib")],
-    datas=collect_data_files("dracaena", includes=["**/*.json", "**/*.txt"]),
-    hiddenimports=["dracaena.platform.launcher"],
-    excludes=["playwright", "tkinter", "PySide6", "PyQt6", "PyQt5", "PySide2"],
+    datas=(collect_data_files("dracaena", includes=["**/*.json", "**/*.txt"])
+           + collect_data_files("playwright")),
+    hiddenimports=["dracaena.platform.launcher", "playwright.sync_api", "playwright._impl._driver"],
+    excludes=[ "tkinter", "PySide6", "PyQt6", "PyQt5", "PySide2"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

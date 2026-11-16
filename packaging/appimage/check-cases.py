@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verificação de 12 casos do AppImage fase 1 (CLI e daemon).
+"""Verificação de 16 casos do AppImage fase 1 (CLI e daemon).
 
 Uso (da raiz do repositório):
     python3 -I packaging/appimage/check-cases.py [caminho/do/arquivo.AppImage]
@@ -7,8 +7,8 @@ Uso (da raiz do repositório):
 Sem argumento, usa dist/appimage/dracaena-x86_64.AppImage.
 Cada caso roda com `env -i`: PATH só com `fusermount` (se existir), HOME e
 TMPDIR em diretório temporário novo. Casos: 2 modos (FUSE e
---appimage-extract-and-run) x 2 alvos (arquivo direto e link simbólico) x 3
-comandos (--help, --version, doctor). Também confere o resíduo da extração em
+--appimage-extract-and-run) x 2 alvos (arquivo direto e link simbólico) x 4
+comandos (--help, --version, doctor, install-browser). Também confere o resíduo da extração em
 TMPDIR e imprime HEAD e SHA-256 do artefato verificado. Sai com 0 só se tudo passar.
 """
 import hashlib
@@ -20,7 +20,7 @@ import sys
 import tempfile
 
 SUBCOMANDOS = {"daemon", "install-browser", "loop", "ask", "toggle", "stop", "status", "doctor", "probe", "once"}
-ESPERADO = {"--help": 0, "--version": 0, "doctor": 1}
+ESPERADO = {"--help": 0, "--version": 0, "doctor": 1, "install-browser": 1}
 
 
 def main():
@@ -51,17 +51,19 @@ def rodar(app, raiz_repo, tmp):
     n = 0
     for modo in ("fuse", "extract"):
         for rotulo, alvo in (("direto", app), ("link", link)):
-            for arg in ("--help", "--version", "doctor"):
-                env = ["PATH=" + str(tmp / "bin"), "HOME=" + str(tmp / "home"), "TMPDIR=" + str(tmp / "tmp")]
+            for arg in ("--help", "--version", "doctor", "install-browser"):
+                case_tmp = tmp / "tmp" / str(n)
+                case_tmp.mkdir()
+                env = ["PATH=" + str(tmp / "bin"), "HOME=" + str(tmp / "home"), "TMPDIR=" + str(case_tmp)]
                 cmd = ["/usr/bin/env", "-i", *env, str(alvo)]
                 if modo == "extract":
                     cmd.append("--appimage-extract-and-run")
                 cmd.append(arg)
-                p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
                 n += 1
                 erro = None
                 if p.returncode != ESPERADO[arg]:
-                    erro = f"exit {p.returncode}, esperado {ESPERADO[arg]}"
+                    erro = f"exit {p.returncode}, esperado {ESPERADO[arg]}: {p.stderr[:300]}"
                 elif p.stderr:
                     erro = "stderr não vazio: " + p.stderr[:200]
                 elif arg == "--help":
@@ -74,19 +76,21 @@ def rodar(app, raiz_repo, tmp):
                         erro = "saída inesperada: " + p.stdout[:80]
                 else:
                     try:
-                        if json.loads(p.stdout).get("ok") is not False:
-                            erro = "doctor deveria ter ok=false"
+                        data = json.loads(p.stdout)
+                        if data.get("ok") is not False:
+                            erro = "esperava ok=false"
+                        elif arg == "install-browser" and "confirmar o download" not in data.get("error", ""):
+                            erro = "driver não chegou à confirmação de download"
                     except ValueError:
-                        erro = "doctor não devolveu JSON"
+                        erro = "comando não devolveu JSON"
                 print(f"{'FALHA' if erro else 'OK   '} {n:2d} {modo:7s} {rotulo:6s} {arg:9s} exit {p.returncode}"
                       + (f"  {erro}" if erro else ""), flush=True)
                 if erro:
                     falhas.append((n, erro))
 
-    residuo = list((tmp / "tmp").glob("appimage_extracted_*"))
-    print(f"resíduo em TMPDIR após --appimage-extract-and-run: {len(residuo)} diretório(s)")
-    if not residuo:
-        falhas.append((0, "esperava resíduo appimage_extracted_* em TMPDIR"))
+    # Informativo: o runtime 13 mediu 0 resíduos; não é garantia do formato.
+    residuo = list((tmp / "tmp").rglob("appimage_extracted_*"))
+    print(f"resíduo em TMPDIR após --appimage-extract-and-run (informativo): {len(residuo)} diretório(s)")
 
     head = subprocess.run(["git", "-C", str(raiz_repo), "rev-parse", "--short", "HEAD"],
                           capture_output=True, text=True).stdout.strip() or "?"
