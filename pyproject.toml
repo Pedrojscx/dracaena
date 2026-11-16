@@ -19,3 +19,4 @@ namespaces = true
 [tool.setuptools.package-data]
 "dracaena.platform.resources" = ["*.json"]
 "dracaena.core.prompts" = ["*.txt"]
+"dracaena.adapters" = ["*.js"]
