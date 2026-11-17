@@ -337,7 +337,10 @@ run_fuse() { # imagem diretório-da-linha modo(limpa|fuse3); imprime status
         echo 'host sem /dev/fuse' >"$rowdir/fuse-$mode.reason"
         return 0
     fi
+    # Em hosts com AppArmor (ex.: runner ubuntu-24.04), o perfil docker-default nega
+    # mount dentro do contêiner; sem isso o FUSE falharia por causa do host, não do pacote.
     local -a args=(--platform linux/amd64 --device /dev/fuse --cap-add SYS_ADMIN
+        --security-opt apparmor=unconfined
         --mount "type=bind,source=$APPIMAGE,target=/work/app.AppImage,readonly")
     if [[ "$mode" == fuse3 ]]; then
         timeout --kill-after=10 300 docker run --rm "${args[@]}" "$image" sh -c "$FUSE3_SH" >"$out" 2>&1 || rc=$?
