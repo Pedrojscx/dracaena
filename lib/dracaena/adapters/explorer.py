@@ -83,14 +83,14 @@ class _Session:
     def __init__(self, cdp, clock, deadline: float):
         self.cdp, self.clock, self.deadline = cdp, clock, deadline
 
-    def check(self) -> None:
+    def ensure_within_limits(self) -> None:
         if self.clock() > self.deadline:
             raise CaptureLimitExceeded("tempo: mais de 10 s")
 
     def send(self, method: str, params: dict | None = None):
         if method not in ALLOWED_METHODS or method in FORBIDDEN_METHODS or method.startswith(FORBIDDEN_PREFIXES):
             raise ForbiddenMethod(method)
-        self.check()
+        self.ensure_within_limits()
         return self.cdp.send(method, params or {})
 
 
@@ -124,7 +124,7 @@ def capture(cdp, *, clock=time.monotonic, max_ms: int = MAX_MS) -> dict:
     stack = [(root, (), True, 0)]
     while stack:
         node, fpath, fsame, depth = stack.pop()
-        session.check()
+        session.ensure_within_limits()
         seen += 1
         if seen > MAX_NODES:
             raise CaptureLimitExceeded("nós: mais de 50.000")
