@@ -33,9 +33,11 @@ No modo FUSE o runtime precisa de `fusermount` no PATH; sem ele, use
 Playwright 1.64.1, seu driver e dependências entram no pacote, com versões e
 SHA-256 fixados. O squashfs usa compressão xz. Como o compressor embutido no empacotador
 só aceita zstd, o build extrai a ferramenta verificada e substitui seu
-`mksquashfs` pelo pacote autenticado `squashfs-tools` da distribuição. O navegador não é embutido:
-`./dracaena-x86_64.AppImage install-browser --yes` baixa o Chromium reserva
-para a pasta de dados do usuário; sem `--yes`, exige confirmação interativa.
+`mksquashfs` pelo pacote autenticado `squashfs-tools` da distribuição. O Chromium
+reserva (Chrome for Testing 156.0.8078.4, revisão 1248, SHA-256 fixado) é embutido
+somente leitura em `_internal/dracaena-browsers`. `entry.py` aponta o fallback do
+Playwright para essa cópia, no lugar do download para a pasta de dados do usuário.
+O Chromium ainda usa as bibliotecas de desktop do sistema (NSS, GTK/ATK, GBM, X11, ALSA).
 Não entram Qt ou bandeja. `doctor` pode retornar 1 por dependências externas
 ausentes. Recursos JSON/TXT do pacote entram como dados. O projeto não é
 instalado via pip: o build seleciona suas dependências explicitamente.
@@ -49,8 +51,9 @@ No modo `--appimage-extract-and-run` o runtime extrai o pacote para um diretóri
 temporário, que respeita `TMPDIR`. Na medição do runtime 13 (`--version`) nenhum
 `appimage_extracted_*` ficou em `TMPDIR` após a saída; esse comportamento não é
 garantido pelo formato e o `check-cases.py` o registra apenas como informação.
-Com a base a54cd96, `--help` lista os dez subcomandos e `--version` está
-disponível. O daemon real permanece indisponível; use `--simulate` para prática.
+Na branch `release/appimage-v0.1.0`, `--help` lista os dez subcomandos, `--version`
+está disponível e o daemon real está incluído (modo simulação por padrão, via
+`DRY_RUN`). Notas da release: [`RELEASE.md`](RELEASE.md).
 
 ## Requisitos e resíduos
 
