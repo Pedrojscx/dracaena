@@ -12,7 +12,7 @@ integração na `main`. **Não é uma versão estável.**
 | Python embutido | 3.12.8 |
 | Playwright e driver | 1.64.1 |
 | Chromium embutido (Chrome for Testing) | 156.0.8078.4 (revisão 1248) |
-| Runtime AppImage | AppImageKit 13, squashfs xz |
+| Runtime AppImage | type2-runtime `20251108` (estático, sem `libfuse2`), squashfs zstd |
 
 As versões e os SHA-256 de Python, PyInstaller, das dependências pip, do Playwright,
 do Chromium, do runtime e do appimagetool estão fixados. Os pacotes `apt` da imagem
@@ -32,7 +32,9 @@ chmod +x dracaena-x86_64.AppImage
 ./dracaena-x86_64.AppImage doctor
 ```
 
-Sem FUSE (contêineres, WSL, algumas distribuições mínimas):
+Sem FUSE (contêineres, WSL, algumas distribuições mínimas) o AppImage também roda por extração.
+Ela grava cerca de 600 MB em `TMPDIR` e **não os apaga ao sair** (o runtime novo não faz a limpeza);
+o diretório `appimage_extracted_<hash>` é reaproveitado nas execuções seguintes e pode ser removido à mão:
 
 ```bash
 APPIMAGE_EXTRACT_AND_RUN=1 ./dracaena-x86_64.AppImage --version
@@ -46,7 +48,7 @@ APPIMAGE_EXTRACT_AND_RUN=1 ./dracaena-x86_64.AppImage --version
 | --- | --- |
 | Arquitetura | Somente x86_64. Não há build ARM (aarch64). |
 | glibc | 2.35 ou mais nova (maior símbolo exigido: `GLIBC_2.35`, medido com `objdump -T`). |
-| FUSE | `libfuse2` (Ubuntu 22.04) ou `libfuse2t64` (Ubuntu 24.04). Sem FUSE, use o modo de extração. |
+| FUSE | **`libfuse2` não é mais necessária.** O modo FUSE precisa só de `/dev/fuse` e de `fusermount3` ou `fusermount` (pacote `fuse3`, presente na maioria dos desktops). Sem eles, use o modo de extração. |
 | Bibliotecas do navegador | O Chromium embutido usa bibliotecas de desktop do sistema: NSS, GTK/ATK, GBM/DRM, X11/XCB, ALSA, CUPS, D-Bus, Pango/Cairo. Um desktop Linux comum já as tem. |
 | Claude Code | `claude` precisa estar instalado e autenticado no PATH. O AppImage não o inclui. |
 
@@ -59,6 +61,32 @@ mais antiga que a 2.35, além de Alpine e outras distribuições musl, ARM, macO
 Para essas plataformas é preciso um build sobre uma base mais antiga ou um pacote próprio.
 
 ## Verificação feita
+
+### Fase B: runtime estático (branch `feat/appimage-runtime-estatico`)
+
+O AppImage passa a usar o runtime oficial `AppImage/type2-runtime` release `20251108`
+(SHA-256 `2fca8b44...ec260d`, estático, sem entradas `NEEDED`) e squashfs zstd, no lugar do
+AppImageKit 13 com xz. O pacote abre por FUSE sem `libfuse2`. Artefato do build local:
+241.695.224 bytes, SHA-256 `777cf649b4fbf9f4dfb5b30c8bd7558892ad6358d4f220aa7d74c2a66d00bd1e`.
+
+| Medição (host Arch, SSD, `env` limpo) | rc4 (xz, AppImageKit 13) | Fase B (zstd, type2) |
+|---|---:|---:|
+| Tamanho do arquivo | 255.882.432 bytes | 241.695.224 bytes (−5,5 %) |
+| `--version` por FUSE (mediana de 10) | 0,75 s | 0,15 s |
+| `--version` com `--appimage-extract-and-run` (mediana de 5, `TMPDIR` novo) | 23,2 s | 1,48 s |
+| Idem, segunda execução no mesmo `TMPDIR` | 23,2 s | 0,53 s |
+| Resíduo em `TMPDIR` após extract-and-run | 0 | ~600 MB (`appimage_extracted_<md5>`) |
+| Resíduo em `TMPDIR` após FUSE | 0 | 1 diretório vazio `.mount_*` |
+
+O que o runtime ainda exige do host: `/dev/fuse` e `fusermount3` ou `fusermount` no PATH
+(sem eles: `No suitable fusermount binary found on the $PATH`). `check-cases.py`: **16/16 OK**.
+Matriz (`matrix.sh`, 11 imagens): as 6 suportadas (Ubuntu 22.04 e 24.04, Debian 12, Fedora,
+Arch, openSUSE Tumbleweed) passam em tudo, inclusive na nova coluna **FUSE (+fuse3)**, que
+instala só `fuse3` na imagem (sem `libfuse2`) e roda o AppImage por FUSE. A coluna **FUSE
+(limpa)** continua N-T nelas, porque a imagem limpa não tem `fusermount`. As cinco não suportadas
+falham como esperado (glibc < 2.35 ou musl). Não testado: Zorin 17/18 reais e máquinas físicas.
+
+#### Resultados da fase anterior (rc3/rc4, runtime AppImageKit 13)
 Resultados da rc3 (tag `v0.1.0-rc3`, commit `e553cc8`, run 44076261704 do workflow
 `AppImage`). Artefato `dracaena-x86_64.AppImage`, 255.882.432 bytes,
 SHA-256 `b4e4cc9aacec0e19fb36084212a268d7b8341528838542a12b80261762f27d3f`.
