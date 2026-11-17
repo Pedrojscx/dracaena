@@ -5,12 +5,16 @@ OUT_DIR=${OUT_DIR:-dist/appimage}
 [[ "$OUT_DIR" = /* ]] || OUT_DIR="$ROOT/$OUT_DIR"
 [[ $(uname -m) = x86_64 ]] || { echo 'Build exige x86_64' >&2; exit 2; }
 . /etc/os-release
-[[ "$ID:$VERSION_ID" = ubuntu:22.04 ]] || { echo 'Build exige ubuntu:22.04' >&2; exit 2; }
-export DEBIAN_FRONTEND=noninteractive
-apt-get update >&2
-apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils \
-  libssl-dev zlib1g-dev libffi-dev libbz2-dev liblzma-dev libsqlite3-dev \
-  libreadline-dev libncurses-dev libgdbm-dev uuid-dev file desktop-file-utils unzip >&2
+# Base: quay.io/pypa/manylinux_2_28_x86_64 (AlmaLinux 8, glibc 2.28), fixada por digest
+# em build.sh e no workflow. Assim o Python, as extensões e as bibliotecas coletadas
+# pelo PyInstaller exigem no máximo GLIBC_2.28.
+[[ "$ID:$VERSION_ID" = almalinux:8.* ]] || { echo 'Build exige AlmaLinux 8 (manylinux_2_28)' >&2; exit 2; }
+[[ $(ldd --version | head -n 1 | awk '{print $NF}') = 2.28 ]] || { echo 'Build exige glibc 2.28' >&2; exit 2; }
+# Pacotes de desenvolvimento dos repositórios AlmaLinux 8 (dnf confere a assinatura GPG
+# do repositório); a imagem base já traz gcc-toolset, zlib-devel, file, unzip e curl.
+dnf install -y --setopt=install_weak_deps=False --setopt=gpgcheck=1 xz openssl-devel libffi-devel \
+  bzip2-devel xz-devel sqlite-devel readline-devel ncurses-devel gdbm-devel libuuid-devel \
+  desktop-file-utils >&2
 WORK=$(mktemp -d /tmp/dracaena-build.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 fetch() {
@@ -70,6 +74,9 @@ cp -a "$WORK/dist/dracaena/." "$APPDIR/usr/bin/"
 cp packaging/appimage/{AppRun,dracaena.desktop,dracaena.svg} "$APPDIR/"
 chmod +x "$APPDIR/AppRun"
 ln -s dracaena.svg "$APPDIR/.DirIcon"
+# Gate de ABI: nenhum ELF do AppDir (Python, extensões, bibliotecas coletadas, Node do
+# driver e Chromium) pode exigir glibc acima de 2.28. A lista completa vai para a saída.
+bash "$ROOT/packaging/appimage/glibc-max.sh" "$APPDIR" 2.28 > "$OUT_DIR/glibc-max.txt"
 desktop-file-validate "$APPDIR/dracaena.desktop"
 ARCH=x86_64 "$WORK/tool/squashfs-root/AppRun" \
   --comp zstd --runtime-file "$WORK/runtime" "$APPDIR" "$OUT_DIR/dracaena-x86_64.AppImage" >&2
@@ -79,6 +86,6 @@ sha256sum "$OUT_DIR/dracaena-x86_64.AppImage" >&2
 stat -c '%s bytes' "$OUT_DIR/dracaena-x86_64.AppImage" >&2
 rm -f "$CHROMIUM_CACHE"
 if [[ -n ${OUTPUT_UID:-} && -n ${OUTPUT_GID:-} ]]; then
-  chown "$OUTPUT_UID:$OUTPUT_GID" "$OUT_DIR" "$OUT_DIR/"{dracaena-x86_64.AppImage,bundled-sizes.txt,build-packages.txt}
+  chown "$OUTPUT_UID:$OUTPUT_GID" "$OUT_DIR" "$OUT_DIR/"{dracaena-x86_64.AppImage,bundled-sizes.txt,build-packages.txt,glibc-max.txt}
 fi
 printf '%s\n' "$OUT_DIR/dracaena-x86_64.AppImage"
