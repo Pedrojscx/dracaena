@@ -8,7 +8,8 @@ Sem argumento, usa dist/appimage/dracaena-x86_64.AppImage.
 Cada caso roda com `env -i`: PATH só com `fusermount` (se existir), HOME e
 TMPDIR em diretório temporário novo. Casos: 2 modos (FUSE e
 --appimage-extract-and-run) x 2 alvos (arquivo direto e link simbólico) x 4
-comandos (--help, --version, doctor, install-browser). Também confere o resíduo da extração em
+comandos (--help, --version, doctor, install-browser). O último deve localizar o
+Chromium incorporado. Também confere o resíduo da extração em
 TMPDIR e imprime HEAD e SHA-256 do artefato verificado. Sai com 0 só se tudo passar.
 """
 import hashlib
@@ -20,7 +21,7 @@ import sys
 import tempfile
 
 SUBCOMANDOS = {"daemon", "install-browser", "loop", "ask", "toggle", "stop", "status", "doctor", "probe", "once"}
-ESPERADO = {"--help": 0, "--version": 0, "doctor": 1, "install-browser": 1}
+ESPERADO = {"--help": 0, "--version": 0, "doctor": 1, "install-browser": 0}
 
 
 def main():
@@ -77,10 +78,11 @@ def rodar(app, raiz_repo, tmp):
                 else:
                     try:
                         data = json.loads(p.stdout)
-                        if data.get("ok") is not False:
-                            erro = "esperava ok=false"
-                        elif arg == "install-browser" and "confirmar o download" not in data.get("error", ""):
-                            erro = "driver não chegou à confirmação de download"
+                        esperado_ok = arg == "install-browser"
+                        if data.get("ok") is not esperado_ok:
+                            erro = f"esperava ok={str(esperado_ok).lower()}"
+                        elif arg == "install-browser" and "já está instalado" not in data.get("message", ""):
+                            erro = "Chromium incorporado não foi localizado"
                     except ValueError:
                         erro = "comando não devolveu JSON"
                 print(f"{'FALHA' if erro else 'OK   '} {n:2d} {modo:7s} {rotulo:6s} {arg:9s} exit {p.returncode}"
