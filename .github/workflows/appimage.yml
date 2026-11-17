@@ -112,6 +112,9 @@ jobs:
         with:
           name: dracaena-x86_64-AppImage
           path: dist/appimage
+      # O artefato do workflow não preserva o bit de execução.
+      - name: Restaurar permissão de execução
+        run: chmod +x dist/appimage/dracaena-x86_64.AppImage
       - name: Testar em ${{ matrix.distro }} sem instalar pacotes
         env:
           MATRIX_ONLY: ${{ matrix.image }}
