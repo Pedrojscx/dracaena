@@ -17,7 +17,8 @@ from fx import REPO, launch
 from dracaena.adapters.base import Registry
 from dracaena.core.errors import ServiceError
 from dracaena.core.model import Option, Question, Target, Verdict
-from dracaena.core.service import Service, default_endpoint
+from dracaena.core.service import BROWSER_HINT, Service, default_endpoint
+from dracaena.platform.browser import BrowserError, BrowserSandboxUnavailable
 
 SINGLE = '{"type":"SINGLE","answers":[0]}'
 
@@ -340,11 +341,33 @@ class ErrorTests(ServiceCase):
         self.assertTrue(self.state("error"))
         self.assertEqual(self.svc.error, "sem navegador")
 
+    def test_sandbox_failure_reaches_state_with_its_condition(self):
+        def blocked():
+            raise BrowserSandboxUnavailable("sandbox indisponível")
+        self.make(endpoint=blocked)
+        self.svc.handle("toggle", {})
+        self.assertTrue(self.state("error"))
+        event = self.kinds("state")[-1]
+        self.assertEqual((event["error"], event["condition"]),
+                         ("sandbox indisponível", "sandbox_unavailable"))
+
+    def test_browser_error_guides_to_install_browser_and_browser_bin(self):
+        def incompatible():
+            raise BrowserError("Navegador padrão detectado não é Chromium")
+        self.make(endpoint=incompatible)
+        self.svc.handle("toggle", {})
+        self.assertTrue(self.state("error"))
+        self.assertIn("Navegador padrão detectado não é Chromium", self.svc.error)
+        self.assertIn("dracaena install-browser", self.svc.error)
+        self.assertIn("BROWSER_BIN", self.svc.error)
+        self.assertEqual(self.svc.snapshot().get("condition"), None)
+
     def test_default_endpoint_without_profile(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"XDG_DATA_HOME": tmp, "APPDATA": tmp}):
             with self.assertRaises(ServiceError) as ctx:
                 default_endpoint()
         self.assertEqual(ctx.exception.code, "no_browser")
+        self.assertIn(BROWSER_HINT, ctx.exception.msg)
 
     def test_no_site(self):
         self.make(tabs=lambda _p: [{"type": "page", "url": "about:blank"}])
