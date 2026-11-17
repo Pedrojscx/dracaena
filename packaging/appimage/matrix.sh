@@ -71,19 +71,21 @@ int main(int argc, char **argv) {
 IPC_C
 chmod 0755 "$IPC"
 
-# slug|rótulo|imagem
+# slug|rótulo|imagem|motivo de não suporte (vazio = suportada)
+# Não suportadas: o AppImage exige glibc 2.35 ou mais nova e não roda em musl.
+# A falha nelas é esperada e não reprova o job; só uma falha nas suportadas reprova.
 IMAGES=(
-    'ubuntu-20.04|Ubuntu 20.04|ubuntu:20.04'
-    'ubuntu-22.04|Ubuntu 22.04|ubuntu:22.04'
-    'ubuntu-24.04|Ubuntu 24.04|ubuntu:24.04'
-    'debian-11|Debian 11|debian:11'
-    'debian-12|Debian 12|debian:12'
-    'fedora-latest|Fedora latest|fedora:latest'
-    'archlinux-latest|Arch Linux latest|archlinux:latest'
-    'opensuse-tumbleweed|openSUSE Tumbleweed|opensuse/tumbleweed'
-    'almalinux-8|AlmaLinux 8|almalinux:8'
-    'almalinux-9|AlmaLinux 9|almalinux:9'
-    'alpine-latest|Alpine latest|alpine:latest'
+    'ubuntu-20.04|Ubuntu 20.04|ubuntu:20.04|glibc 2.31 < 2.35'
+    'ubuntu-22.04|Ubuntu 22.04|ubuntu:22.04|'
+    'ubuntu-24.04|Ubuntu 24.04|ubuntu:24.04|'
+    'debian-11|Debian 11|debian:11|glibc 2.31 < 2.35'
+    'debian-12|Debian 12|debian:12|'
+    'fedora-latest|Fedora latest|fedora:latest|'
+    'archlinux-latest|Arch Linux latest|archlinux:latest|'
+    'opensuse-tumbleweed|openSUSE Tumbleweed|opensuse/tumbleweed|'
+    'almalinux-8|AlmaLinux 8|almalinux:8|glibc 2.28 < 2.35'
+    'almalinux-9|AlmaLinux 9|almalinux:9|glibc 2.34 < 2.35'
+    'alpine-latest|Alpine latest|alpine:latest|musl, sem glibc'
 )
 
 mkdir -p "$(dirname "$REPORT")"
@@ -319,7 +321,7 @@ run_fuse() { # imagem diretório-da-linha; imprime status
 }
 
 for spec in "${IMAGES[@]}"; do
-    IFS='|' read -r slug distro image <<<"$spec"
+    IFS='|' read -r slug distro image unsupported <<<"$spec"
     if [[ -n "$ONLY" && "$ONLY" != "$slug" && "$ONLY" != "$image" ]]; then
         continue
     fi
@@ -353,19 +355,24 @@ for spec in "${IMAGES[@]}"; do
     fi
     [[ -n "$error" ]] || error='—'
 
+    label="$distro"
+    [[ -z "$unsupported" ]] || label="$distro (não suportado, falha esperada: $unsupported)"
     printf '| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n' \
-        "$(markdown "$distro")" "$(markdown "$libc")" "$version" "$help" "$doctor" \
+        "$(markdown "$label")" "$(markdown "$libc")" "$version" "$help" "$doctor" \
         "$daemon" "$browser" "$extract" "$fuse" "$(markdown "$error")" >>"$REPORT"
 
-    if [[ "$image" == alpine:* ]]; then
-        if [[ "$libc" != *musl* || "$version" != FALHA || "$help" != FALHA \
-            || "$doctor" != FALHA || "$daemon" != FALHA || "$browser" != FALHA || "$extract" != FALHA \
-            || "$error" == '—' ]]; then
-            echo "[matriz] Alpine não apresentou a falha limpa esperada" >&2
-            FAILED=1
-        fi
-    elif [[ "$version" == FALHA || "$help" == FALHA || "$doctor" == FALHA \
+    failed_here=0
+    if [[ "$version" == FALHA || "$help" == FALHA || "$doctor" == FALHA \
         || "$daemon" == FALHA || "$browser" == FALHA || "$extract" == FALHA || "$fuse" == FALHA ]]; then
+        failed_here=1
+    fi
+    if [[ -n "$unsupported" ]]; then
+        # Falha esperada: não reprova. Se passar, avisa para revisar a lista de não suportados.
+        if [[ "$failed_here" -eq 0 ]]; then
+            echo "[matriz] aviso: $distro ($unsupported) passou em tudo; revise a lista de não suportados" >&2
+        fi
+    elif [[ "$failed_here" -eq 1 ]]; then
+        echo "[matriz] REGRESSÃO: $distro é suportada e falhou" >&2
         FAILED=1
     fi
 

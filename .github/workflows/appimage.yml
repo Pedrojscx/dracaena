@@ -61,6 +61,8 @@ jobs:
             ${{ env.OUT_DIR }}/verify.log
           if-no-files-found: error
           retention-days: 14
+  # Distros não suportadas (glibc < 2.35 e musl) falham como esperado e não reprovam o job;
+  # a lista fica em packaging/appimage/matrix.sh. Só falha nas suportadas deixa o job vermelho.
   compatibilidade:
     name: Compatibilidade (${{ matrix.distro }})
     needs: appimage
@@ -70,7 +72,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - distro: Ubuntu 20.04
+          - distro: Ubuntu 20.04 (não suportado, falha esperada)
             slug: ubuntu-20.04
             image: ubuntu:20.04
           - distro: Ubuntu 22.04
@@ -79,7 +81,7 @@ jobs:
           - distro: Ubuntu 24.04
             slug: ubuntu-24.04
             image: ubuntu:24.04
-          - distro: Debian 11
+          - distro: Debian 11 (não suportado, falha esperada)
             slug: debian-11
             image: debian:11
           - distro: Debian 12
@@ -94,13 +96,13 @@ jobs:
           - distro: openSUSE Tumbleweed
             slug: opensuse-tumbleweed
             image: opensuse/tumbleweed
-          - distro: AlmaLinux 8
+          - distro: AlmaLinux 8 (não suportado, falha esperada)
             slug: almalinux-8
             image: almalinux:8
-          - distro: AlmaLinux 9
+          - distro: AlmaLinux 9 (não suportado, falha esperada)
             slug: almalinux-9
             image: almalinux:9
-          - distro: Alpine latest
+          - distro: Alpine latest (não suportado, falha esperada)
             slug: alpine-latest
             image: alpine:latest
     steps:

@@ -53,25 +53,45 @@ APPIMAGE_EXTRACT_AND_RUN=1 ./dracaena-x86_64.AppImage --version
 Distribuições que atendem a glibc 2.35, como referência: Ubuntu 22.04+, Debian 12+,
 Fedora 36+, Linux Mint 21+, Pop!_OS 22.04+, Arch/Manjaro atuais, openSUSE Tumbleweed.
 
-Não suportados nesta release: Ubuntu 20.04, Debian 11, RHEL/Rocky/Alma 8 e outras
-distribuições com glibc mais antiga, além de ARM, macOS e Windows.
+Não suportados nesta release: Ubuntu 20.04 (glibc 2.31), Debian 11 (2.31),
+RHEL/Rocky/AlmaLinux 8 (2.28) e 9 (2.34, medido no AlmaLinux 9) e outras distribuições com glibc
+mais antiga que a 2.35, além de Alpine e outras distribuições musl, ARM, macOS e Windows.
 Para essas plataformas é preciso um build sobre uma base mais antiga ou um pacote próprio.
 
 ## Verificação feita
+Resultados da rc3 (tag `v0.1.0-rc3`, commit `e553cc8`, run 44076261704 do workflow
+`AppImage`). Artefato `dracaena-x86_64.AppImage`, 255.882.432 bytes,
+SHA-256 `b4e4cc9aacec0e19fb36084212a268d7b8341528838542a12b80261762f27d3f`.
 
-No artefato `dracaena-x86_64.AppImage` (255.878.336 bytes,
-SHA-256 `f86105bb906de56347016d63bfa707323579b2577f8ee88b53796c9276842f4e`):
+O job `appimage` passou em `verify.sh` (resultado `OK`): `--version`, `--help`, `doctor`
+e `daemon` com socket e `status` respondendo, em contêiner sem Python do sistema. O job
+`compatibilidade` roda `packaging/appimage/matrix.sh` em 11 imagens limpas, sem instalar
+pacotes. A coluna `navegador` confere, sem `BROWSER_BIN`, Firefox padrão, Chromium padrão
+e nenhum navegador (Firefox e nenhum usam o Chromium embutido).
 
-```bash
-python3 -I packaging/appimage/check-cases.py dracaena-x86_64.AppImage
-```
+| Distro | libc | `--version` | `--help` | `doctor` | daemon + IPC | navegador | extract-and-run | FUSE | Resultado |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| Ubuntu 20.04 (não suportado) | 2.31 | FALHA | FALHA | FALHA | FALHA | FALHA | OK | N-T | falha esperada: `GLIBC_2.35` não encontrada |
+| Ubuntu 22.04 | 2.35 | OK | OK | OK | OK | OK | OK | N-T | OK; FUSE não testado (imagem sem `libfuse2`) |
+| Ubuntu 24.04 | 2.39 | OK | OK | OK | OK | OK | OK | N-T | OK; FUSE não testado (imagem sem `libfuse2`) |
+| Debian 11 (não suportado) | 2.31 | FALHA | FALHA | FALHA | FALHA | FALHA | OK | N-T | falha esperada: `GLIBC_2.35` não encontrada |
+| Debian 12 | 2.36 | OK | OK | OK | OK | OK | OK | N-T | OK; FUSE não testado (imagem sem `libfuse2`) |
+| Fedora latest | 2.44 | OK | OK | OK | OK | OK | OK | N-T | OK; FUSE não testado (imagem sem `libfuse2`) |
+| Arch Linux latest | 2.44 | OK | OK | OK | OK | OK | OK | N-T | OK; FUSE não testado (imagem sem `libfuse2`) |
+| openSUSE Tumbleweed | 2.44 | OK | OK | OK | OK | OK | OK | N-T | OK; FUSE não testado (imagem sem `libfuse2`) |
+| AlmaLinux 8 (não suportado) | 2.28 | FALHA | FALHA | FALHA | FALHA | FALHA | OK | N-T | falha esperada: `GLIBC_2.35` não encontrada |
+| AlmaLinux 9 (não suportado) | 2.34 | FALHA | FALHA | FALHA | FALHA | FALHA | OK | N-T | falha esperada: `GLIBC_2.35` não encontrada |
+| Alpine latest (não suportado) | musl 1.2.6 | FALHA | FALHA | FALHA | FALHA | FALHA | FALHA | FALHA | falha esperada: executável glibc não carrega em musl |
 
-Resultado: **16/16 casos OK**. Foram executados `--help`, `--version`, `doctor` e
-`install-browser` com `env -i`, em FUSE e em extração, direto e por link simbólico.
-Não sobrou diretório em `TMPDIR`.
+- **OK** em Ubuntu 22.04 e 24.04, Debian 12, Fedora, Arch e openSUSE Tumbleweed (glibc 2.35 ou mais nova).
+- **FUSE não testado** nessas imagens, porque elas não trazem `libfuse2` (`dlopen(): error loading libfuse.so.2`). Isso conta como "não testado", não como falha. A extração do AppImage funcionou em todas as imagens glibc; nas não suportadas só a execução falha.
+- **Falha esperada** em Ubuntu 20.04, Debian 11, AlmaLinux 8 e AlmaLinux 9 (glibc 2.31, 2.31, 2.28 e 2.34): o Python embutido exige `GLIBC_2.35`. O Alpine (musl) também falha, como previsto.
+- O job fica verde nas distribuições não suportadas e vermelho só se uma suportada regredir.
+- `doctor` sai com 1 quando faltam dependências externas, como o Claude Code. Isso é esperado nas imagens limpas.
 
-`doctor` sai com 1 quando faltam dependências externas, como o Claude Code. Isso
-é esperado no ambiente limpo do teste.
+A matriz roda dentro de contêineres Docker sobre o kernel do runner. Isso não substitui um
+teste em máquina real, e o navegador foi verificado pela escolha do executável (`doctor` e
+`install-browser`), não por uma sessão de navegação.
 
 ### Escolha do navegador
 
@@ -122,7 +142,8 @@ Os testes da branch servem para isso.
 - Job `compatibilidade`: roda `packaging/appimage/matrix.sh` em 11 imagens limpas (Ubuntu
   20.04/22.04/24.04, Debian 11/12, Fedora, Arch, openSUSE Tumbleweed, AlmaLinux 8/9 e
   Alpine), sem instalar pacotes, e publica uma linha da matriz por imagem. As imagens com
-  glibc anterior à 2.35 e o Alpine (musl) são esperadas como falha nesta release.
+  glibc anterior à 2.35 e o Alpine (musl) são marcadas como "não suportado, falha esperada":
+  a falha não reprova o job, que só fica vermelho se uma imagem suportada regredir.
 
 Detalhes técnicos do empacotamento estão em [`README.md`](README.md).
 
