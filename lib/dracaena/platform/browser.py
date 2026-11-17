@@ -321,24 +321,29 @@ def resolve(executable="", fallback="playwright"):
         raise BrowserError("Navegador configurado não é Chromium válido nem respondeu ao CDP; configuração explícita tem prioridade")
     try:
         candidate = default_browser()
-    except BrowserUnsupported:
-        raise
+    except BrowserUnsupported as exc:
+        return _reserve(fallback, exc)
     except (OSError, KeyError, subprocess.SubprocessError, BrowserError):
         candidate = ""
     if candidate:
         if sandboxed(candidate):  # Flatpak/Snap: nome não basta, só a sonda decide
             if supports_cdp(candidate):
                 return candidate
-            raise BrowserUnsupported("Navegador padrão em Flatpak/Snap não respondeu ao CDP")
+            return _reserve(fallback, BrowserUnsupported("Navegador padrão em Flatpak/Snap não respondeu ao CDP"))
         if is_chromium(candidate):
             return candidate
-        raise BrowserError("Navegador padrão detectado não é Chromium nem respondeu ao CDP; configure um navegador compatível")
-    if fallback == "playwright":
-        path = fallback_executable()
-        if path:
-            return path
-        raise FallbackMissing(f"O Chromium reserva ainda não foi baixado (ocupa cerca de {FALLBACK_SIZE} em disco)")
-    raise NoBrowser("Nenhum navegador Chromium configurado ou detectado")
+        return _reserve(fallback, BrowserError("Navegador padrão detectado não é Chromium nem respondeu ao CDP; configure um navegador compatível"))
+    return _reserve(fallback, NoBrowser("Nenhum navegador Chromium configurado ou detectado"))
+
+
+def _reserve(fallback, error):
+    """Sem navegador utilizável (ausente ou incompatível): Chromium reserva, se ativado; senão, o erro."""
+    if fallback != "playwright":
+        raise error
+    path = fallback_executable()
+    if path:
+        return path
+    raise FallbackMissing(f"O Chromium reserva ainda não foi baixado (ocupa cerca de {FALLBACK_SIZE} em disco)")
 
 
 def fallback_dir():

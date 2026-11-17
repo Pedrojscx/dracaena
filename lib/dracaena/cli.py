@@ -37,25 +37,31 @@ def install_browser(assume_yes, ask=input, interactive=None):
         print(json.dumps({"ok": ok, ("message" if ok else "error"): message, **extra}, ensure_ascii=False))
         return 0 if ok else 1
 
+    incompatible = False
     try:
         cfg = config.load()
         found = browser.resolve(cfg.get("BROWSER_BIN", ""), "")
         return say(True, f"Já existe um navegador configurado ou detectado ({found}); nada a baixar.")
     except browser.NoBrowser:
         pass
-    except (browser.BrowserError, ValueError, OSError) as exc:
-        return say(False, str(exc))  # navegador explícito/detectado tem prioridade: não baixa
+    except browser.BrowserError as exc:
+        if cfg.get("BROWSER_BIN"):
+            return say(False, str(exc))  # navegador explícito inválido: sem reserva
+        incompatible = True  # padrão detectado incompatível: segue para o Chromium reserva
+    except (ValueError, OSError) as exc:
+        return say(False, str(exc))
     if cfg.get("BROWSER_FALLBACK") != "playwright":
         return say(False, "O navegador reserva está desativado nas configurações (BROWSER_FALLBACK).")
     try:
         existing = browser.fallback_executable()
         if existing:
-            return say(True, f"O Chromium reserva já está instalado ({existing}).")
+            return say(True, f"O Chromium reserva já está instalado ({existing})."
+                       + (" O navegador padrão é incompatível; ele será usado no lugar." if incompatible else ""))
         interactive = sys.stdin.isatty() if interactive is None else interactive
         if not assume_yes:
             if not interactive:
                 return say(False, "É preciso confirmar o download: rode em um terminal ou use --yes.")
-            answer = ask(f"Nenhum navegador foi encontrado. Baixar o Chromium (cerca de {browser.FALLBACK_SIZE} em disco) "
+            answer = ask(f"{'O navegador padrão é incompatível' if incompatible else 'Nenhum navegador foi encontrado'}. Baixar o Chromium (cerca de {browser.FALLBACK_SIZE} em disco) "
                          f"para {browser.fallback_dir()}? [s/N] ").strip().lower()
             if answer not in ("s", "sim", "y", "yes"):
                 return say(False, "Download cancelado.")
