@@ -74,19 +74,20 @@ IPC_C
 chmod 0755 "$IPC"
 
 # slug|rótulo|imagem|motivo de não suporte (vazio = suportada)
-# Não suportadas: o AppImage exige glibc 2.35 ou mais nova e não roda em musl.
-# A falha nelas é esperada e não reprova o job; só uma falha nas suportadas reprova.
+# Não suportada: só musl (Alpine). O AppImage é construído sobre glibc 2.28 e roda em
+# qualquer glibc >= 2.28. A falha nas não suportadas é esperada e não reprova o job;
+# só uma falha nas suportadas reprova.
 IMAGES=(
-    'ubuntu-20.04|Ubuntu 20.04|ubuntu:20.04|glibc 2.31 < 2.35'
+    'ubuntu-20.04|Ubuntu 20.04|ubuntu:20.04|'
     'ubuntu-22.04|Ubuntu 22.04|ubuntu:22.04|'
     'ubuntu-24.04|Ubuntu 24.04|ubuntu:24.04|'
-    'debian-11|Debian 11|debian:11|glibc 2.31 < 2.35'
+    'debian-11|Debian 11|debian:11|'
     'debian-12|Debian 12|debian:12|'
     'fedora-latest|Fedora latest|fedora:latest|'
     'archlinux-latest|Arch Linux latest|archlinux:latest|'
     'opensuse-tumbleweed|openSUSE Tumbleweed|opensuse/tumbleweed|'
-    'almalinux-8|AlmaLinux 8|almalinux:8|glibc 2.28 < 2.35'
-    'almalinux-9|AlmaLinux 9|almalinux:9|glibc 2.34 < 2.35'
+    'almalinux-8|AlmaLinux 8|almalinux:8|'
+    'almalinux-9|AlmaLinux 9|almalinux:9|'
     'alpine-latest|Alpine latest|alpine:latest|musl, sem glibc'
 )
 

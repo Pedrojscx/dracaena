@@ -1,6 +1,6 @@
 name: AppImage
 # Gera o AppImage com o mesmo script do build local
-# (packaging/appimage/container-build.sh dentro de ubuntu:22.04), verifica que
+# (packaging/appimage/container-build.sh dentro de manylinux_2_28, AlmaLinux 8), verifica que
 # ele roda sem o Python do sistema e publica o arquivo como artefato do
 # workflow. Só roda em tag ou disparo manual; nada aqui roda em pull_request.
 on:
@@ -18,8 +18,11 @@ concurrency:
   group: appimage-${{ github.ref }}
   cancel-in-progress: false
 env:
-  # ubuntu:22.04 fixado por digest; o mesmo para o build e para a verificação.
-  BUILD_IMAGE: ubuntu:22.04@sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c
+  # Build: manylinux_2_28 (AlmaLinux 8, glibc 2.28) da PyPA, fixada por digest. Mantenha igual
+  # ao padrão de packaging/appimage/build.sh.
+  BUILD_IMAGE: quay.io/pypa/manylinux_2_28_x86_64@sha256:d086f64cddcace250ef0f0073583c51b8298159303290a730c9f59bd91edfd2c
+  # Verificação sem Python: ubuntu:22.04 fixado por digest (a imagem de build tem Python).
+  VERIFY_IMAGE: ubuntu:22.04@sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c
   OUT_DIR: dist/appimage
 jobs:
   appimage:
@@ -29,7 +32,7 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
-      - name: Build no contêiner ubuntu:22.04
+      - name: Build no contêiner manylinux_2_28 (glibc 2.28)
         id: build
         run: |
           mkdir -p "$OUT_DIR"
@@ -42,7 +45,7 @@ jobs:
           ls -l "$OUT_DIR"
       - name: Verificar sem Python do sistema (host e contêiner)
         env:
-          VERIFY_IMAGE: ${{ env.BUILD_IMAGE }}
+          VERIFY_IMAGE: ${{ env.VERIFY_IMAGE }}
           # Em tag, sempre exige; no disparo manual, segue a entrada.
           VERIFY_VERSION: ${{ (github.event_name == 'workflow_dispatch' && !inputs.require_version) && '0' || '1' }}
         run: |
@@ -58,10 +61,11 @@ jobs:
             ${{ env.OUT_DIR }}/dracaena-x86_64.AppImage
             ${{ env.OUT_DIR }}/bundled-sizes.txt
             ${{ env.OUT_DIR }}/build-packages.txt
+            ${{ env.OUT_DIR }}/glibc-max.txt
             ${{ env.OUT_DIR }}/verify.log
           if-no-files-found: error
           retention-days: 14
-  # Distros não suportadas (glibc < 2.35 e musl) falham como esperado e não reprovam o job;
+  # Distros não suportadas (só musl, como o Alpine) falham como esperado e não reprovam o job;
   # a lista fica em packaging/appimage/matrix.sh. Só falha nas suportadas deixa o job vermelho.
   compatibilidade:
     name: Compatibilidade (${{ matrix.distro }})
@@ -72,7 +76,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - distro: Ubuntu 20.04 (não suportado, falha esperada)
+          - distro: Ubuntu 20.04
             slug: ubuntu-20.04
             image: ubuntu:20.04
           - distro: Ubuntu 22.04
@@ -81,7 +85,7 @@ jobs:
           - distro: Ubuntu 24.04
             slug: ubuntu-24.04
             image: ubuntu:24.04
-          - distro: Debian 11 (não suportado, falha esperada)
+          - distro: Debian 11
             slug: debian-11
             image: debian:11
           - distro: Debian 12
@@ -96,10 +100,10 @@ jobs:
           - distro: openSUSE Tumbleweed
             slug: opensuse-tumbleweed
             image: opensuse/tumbleweed
-          - distro: AlmaLinux 8 (não suportado, falha esperada)
+          - distro: AlmaLinux 8
             slug: almalinux-8
             image: almalinux:8
-          - distro: AlmaLinux 9 (não suportado, falha esperada)
+          - distro: AlmaLinux 9
             slug: almalinux-9
             image: almalinux:9
           - distro: Alpine latest (não suportado, falha esperada)
