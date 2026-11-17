@@ -5,7 +5,7 @@ Uso (da raiz do repositório):
     python3 -I packaging/appimage/check-cases.py [caminho/do/arquivo.AppImage]
 
 Sem argumento, usa dist/appimage/dracaena-x86_64.AppImage.
-Cada caso roda com `env -i`: PATH só com `fusermount` (se existir), HOME e
+Cada caso roda com `env -i`: PATH só com `fusermount3` ou `fusermount` (se existir), HOME e
 TMPDIR em diretório temporário novo. Casos: 2 modos (FUSE e
 --appimage-extract-and-run) x 2 alvos (arquivo direto e link simbólico) x 4
 comandos (--help, --version, doctor, install-browser). O último deve localizar o
@@ -42,14 +42,19 @@ def rodar(app, raiz_repo, tmp):
     (tmp / "bin").mkdir()
     (tmp / "home").mkdir()
     (tmp / "tmp").mkdir()
-    fusermount = shutil.which("fusermount") or shutil.which("fusermount3")
-    if fusermount:
-        (tmp / "bin" / "fusermount").symlink_to(fusermount)
+    # O runtime estático aceita fusermount3 ou fusermount; prefere-se o fuse3, que é o
+    # que as distribuições atuais trazem, e o link leva o nome real do auxiliar.
+    for nome in ("fusermount3", "fusermount"):
+        fusermount = shutil.which(nome)
+        if fusermount:
+            (tmp / "bin" / nome).symlink_to(fusermount)
+            break
     link = tmp / "dracaena"
     link.symlink_to(app)
 
     falhas = []
     n = 0
+    residuos = 0
     for modo in ("fuse", "extract"):
         for rotulo, alvo in (("direto", app), ("link", link)):
             for arg in ("--help", "--version", "doctor", "install-browser"):
@@ -62,6 +67,12 @@ def rodar(app, raiz_repo, tmp):
                 cmd.append(arg)
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
                 n += 1
+                # Mede o resíduo da extração e libera o espaço: o runtime estático
+                # não apaga o diretório extraído (~600 MB por caso).
+                sobras = list(case_tmp.glob("appimage_extracted_*"))
+                residuos += len(sobras)
+                if sobras:
+                    shutil.rmtree(case_tmp, ignore_errors=True)
                 erro = None
                 if p.returncode != ESPERADO[arg]:
                     erro = f"exit {p.returncode}, esperado {ESPERADO[arg]}: {p.stderr[:300]}"
@@ -90,9 +101,9 @@ def rodar(app, raiz_repo, tmp):
                 if erro:
                     falhas.append((n, erro))
 
-    # Informativo: o runtime 13 mediu 0 resíduos; não é garantia do formato.
-    residuo = list((tmp / "tmp").rglob("appimage_extracted_*"))
-    print(f"resíduo em TMPDIR após --appimage-extract-and-run (informativo): {len(residuo)} diretório(s)")
+    # Informativo, não reprova: o runtime estático type2 20251108 deixa um diretório
+    # appimage_extracted_<md5> por TMPDIR; o AppImageKit 13 não deixava nenhum.
+    print(f"resíduo em TMPDIR após --appimage-extract-and-run (informativo): {residuos} diretório(s) em 8 casos")
 
     head = subprocess.run(["git", "-C", str(raiz_repo), "rev-parse", "--short", "HEAD"],
                           capture_output=True, text=True).stdout.strip() or "?"
