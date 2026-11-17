@@ -59,10 +59,10 @@ def run():
     except browser.BrowserUnsupported as exc:
         add("browser", False, str(exc),
             "Navegadores em Flatpak/Snap podem não expor o CDP: informe em 'Navegador' (BROWSER_BIN) o caminho de um "
-            "executável Chromium instalado fora do sandbox.")
+            "executável Chromium instalado fora do sandbox, ou ative o navegador reserva (BROWSER_FALLBACK).")
     except browser.BrowserError as exc:
         add("browser", False, str(exc),
-            "Informe um navegador Chromium nas configurações ou rode 'dracaena install-browser' para o navegador reserva.")
+            "Informe um navegador Chromium nas configurações ou ative o navegador reserva (BROWSER_FALLBACK) e rode 'dracaena install-browser'.")
     except Exception:
         add("browser", False, "Não foi possível verificar o navegador.",
             "Informe um navegador Chromium nas configurações.")

@@ -255,7 +255,9 @@ class SandboxTests(unittest.TestCase):
                 patch.object(browser, "is_chromium", return_value=True) as by_name:
             with patch.object(browser, "supports_cdp", return_value=False):
                 with self.assertRaisesRegex(browser.BrowserUnsupported, "Flatpak/Snap"):
-                    browser.resolve("", "playwright")
+                    browser.resolve("", "")
+                with patch.object(browser, "fallback_executable", return_value="/reserva/chrome"):
+                    self.assertEqual(browser.resolve("", "playwright"), "/reserva/chrome")
             with patch.object(browser, "supports_cdp", return_value=True):
                 self.assertEqual(browser.resolve("", ""), "/snap/bin/navegador")
         by_name.assert_not_called()

@@ -98,10 +98,37 @@ class PlatformTests(unittest.TestCase):
                 with self.assertRaises(browser.BrowserError):
                     browser.read_port(directory)
 
-    def test_no_implicit_fallback(self):
-        with patch.object(browser, "default_browser", return_value="firefox"), patch.object(browser, "is_chromium", return_value=False):
-            with self.assertRaises(browser.BrowserError):
+    def test_incompatible_default_without_fallback_enabled_is_error(self):
+        with patch.object(browser, "default_browser", return_value="firefox"), patch.object(browser, "is_chromium", return_value=False), \
+                patch.object(browser, "fallback_executable") as reserve:
+            with self.assertRaises(browser.BrowserError) as caught:
+                browser.resolve("", "")
+            self.assertNotIsInstance(caught.exception, (browser.NoBrowser, browser.FallbackMissing))
+            reserve.assert_not_called()
+
+    def test_incompatible_default_uses_fallback_when_present(self):
+        with patch.object(browser, "default_browser", return_value="firefox"), patch.object(browser, "is_chromium", return_value=False), \
+                patch.object(browser, "fallback_executable", return_value="/reserva/chrome"):
+            self.assertEqual(browser.resolve(), "/reserva/chrome")
+            self.assertEqual(browser.resolve("", "playwright"), "/reserva/chrome")
+
+    def test_incompatible_default_with_fallback_absent_is_fallback_missing(self):
+        with patch.object(browser, "default_browser", return_value="firefox"), patch.object(browser, "is_chromium", return_value=False), \
+                patch.object(browser, "fallback_executable", return_value=None):
+            with self.assertRaises(browser.FallbackMissing):
                 browser.resolve()
+
+    def test_chromium_default_ignores_fallback(self):
+        with patch.object(browser, "default_browser", return_value="chromium"), patch.object(browser, "is_chromium", return_value=True), \
+                patch.object(browser, "fallback_executable", return_value="/reserva/chrome") as reserve:
+            self.assertEqual(browser.resolve(), "chromium")
+            reserve.assert_not_called()
+
+    def test_invalid_explicit_browser_ignores_fallback(self):
+        with patch.object(browser, "is_chromium", return_value=False), patch.object(browser, "fallback_executable", return_value="/reserva/chrome") as reserve:
+            with self.assertRaises(browser.BrowserError):
+                browser.resolve("configured", "playwright")
+            reserve.assert_not_called()
 
     def test_explicit_browser_precedes_detection(self):
         with patch.object(browser, "default_browser") as detect, patch.object(browser, "is_chromium", return_value=True):
@@ -125,10 +152,20 @@ class PlatformTests(unittest.TestCase):
         with patch.object(browser, "default_browser", side_effect=browser.BrowserError("absent")), patch("playwright.sync_api.sync_playwright", return_value=context):
             self.assertEqual(browser.resolve(), __file__)
 
-    def test_detected_sandbox_browser_does_not_silently_fallback(self):
-        with patch.object(browser, "default_browser", side_effect=browser.BrowserUnsupported("Flatpak")):
+    def test_unsupported_sandbox_browser_uses_fallback_only_when_enabled(self):
+        with patch.object(browser, "default_browser", side_effect=browser.BrowserUnsupported("Flatpak")), \
+                patch.object(browser, "fallback_executable", return_value="/reserva/chrome"):
             with self.assertRaises(browser.BrowserUnsupported):
-                browser.resolve()
+                browser.resolve("", "")
+            self.assertEqual(browser.resolve(), "/reserva/chrome")
+
+    def test_sandboxed_default_without_cdp_uses_fallback(self):
+        with patch.object(browser, "default_browser", return_value="/var/lib/flatpak/exports/bin/org.mozilla.firefox"), \
+                patch.object(browser, "sandboxed", return_value=True), patch.object(browser, "supports_cdp", return_value=False), \
+                patch.object(browser, "fallback_executable", return_value="/reserva/chrome"):
+            self.assertEqual(browser.resolve(), "/reserva/chrome")
+            with self.assertRaises(browser.BrowserUnsupported):
+                browser.resolve("", "")
 
 
 class LaunchSandboxTests(unittest.TestCase):
@@ -313,7 +350,25 @@ class InstallBrowserCommandTests(unittest.TestCase):
         code, result, install, _ = self.run_command(assume_yes=True, resolve="/usr/bin/chromium")
         self.assertEqual(code, 0)
         install.assert_not_called()
-        code, result, install, _ = self.run_command(assume_yes=True, resolve=browser.BrowserError("Navegador configurado não é Chromium válido"))
+        code, result, install, _ = self.run_command(assume_yes=True, cfg={"BROWSER_BIN": "/x/firefox"},
+                                                    resolve=browser.BrowserError("Navegador configurado não é Chromium válido"))
+        self.assertEqual(code, 1)
+        install.assert_not_called()
+
+    def test_incompatible_default_proceeds_to_reserve_but_explicit_does_not(self):
+        incompatible = browser.BrowserError("Navegador padrão detectado não é Chromium")
+        code, result, install, _ = self.run_command(assume_yes=True, resolve=incompatible, existing="/dados/chrome")
+        self.assertEqual(code, 0)
+        self.assertIn("incompatível", result["message"])
+        install.assert_not_called()
+        code, result, install, prompts = self.run_command(answer="s", resolve=incompatible)
+        self.assertEqual(code, 0)
+        install.assert_called_once()
+        self.assertIn("incompatível", prompts[0])
+        code, result, install, _ = self.run_command(assume_yes=True, resolve=incompatible, cfg={"BROWSER_BIN": "/x/firefox"}, existing="/dados/chrome")
+        self.assertEqual(code, 1)
+        install.assert_not_called()
+        code, result, install, _ = self.run_command(assume_yes=True, resolve=incompatible, cfg={"BROWSER_FALLBACK": ""})
         self.assertEqual(code, 1)
         install.assert_not_called()
 

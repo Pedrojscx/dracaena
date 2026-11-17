@@ -14,7 +14,7 @@ FIELDS = {
     "CLAUDE_TIMEOUT": dict(label="Tempo limite do Claude (s)", description="Segundos de espera pela resposta do Claude antes de desistir da questão.", min=1, max=3600),
     "CLAUDE_BIN": dict(label="Executável do Claude", description="Caminho do Claude Code. Vazio procura o comando 'claude' no PATH."),
     "BROWSER_BIN": dict(label="Navegador", description="Caminho de um navegador baseado em Chromium. Vazio usa o navegador padrão detectado."),
-    "BROWSER_FALLBACK": dict(label="Navegador reserva", description="Usado só quando nenhum navegador estiver configurado ou detectado. 'playwright' usa o Chromium do Playwright; vazio desativa.", choices=["", "playwright"]),
+    "BROWSER_FALLBACK": dict(label="Navegador reserva", description="Usado quando nenhum navegador estiver configurado ou detectado, ou quando o padrão detectado não for compatível (não Chromium, sem CDP, Flatpak/Snap). Um navegador informado em 'Navegador' nunca cai para o reserva. 'playwright' usa o Chromium do Playwright; vazio desativa.", choices=["", "playwright"]),
     "MAX_QUESTIONS": dict(label="Máximo de questões", description="Quantidade máxima de questões respondidas por sessão.", min=1, max=1000),
     "KEEP_DAYS": dict(label="Dias de retenção", description="Dias em que registros e respostas locais são mantidos antes da limpeza.", min=1, max=3650),
     "CLICK_SUBMIT": dict(label="Enviar a prática automaticamente", description="1 clica no botão de envio da prática depois de marcar a resposta; 0 apenas marca.", min=0, max=1),
