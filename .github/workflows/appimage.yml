@@ -61,3 +61,67 @@ jobs:
             ${{ env.OUT_DIR }}/verify.log
           if-no-files-found: error
           retention-days: 14
+  compatibilidade:
+    name: Compatibilidade (${{ matrix.distro }})
+    needs: appimage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: Ubuntu 20.04
+            slug: ubuntu-20.04
+            image: ubuntu:20.04
+          - distro: Ubuntu 22.04
+            slug: ubuntu-22.04
+            image: ubuntu:22.04
+          - distro: Ubuntu 24.04
+            slug: ubuntu-24.04
+            image: ubuntu:24.04
+          - distro: Debian 11
+            slug: debian-11
+            image: debian:11
+          - distro: Debian 12
+            slug: debian-12
+            image: debian:12
+          - distro: Fedora latest
+            slug: fedora-latest
+            image: fedora:latest
+          - distro: Arch Linux latest
+            slug: archlinux-latest
+            image: archlinux:latest
+          - distro: openSUSE Tumbleweed
+            slug: opensuse-tumbleweed
+            image: opensuse/tumbleweed
+          - distro: AlmaLinux 8
+            slug: almalinux-8
+            image: almalinux:8
+          - distro: AlmaLinux 9
+            slug: almalinux-9
+            image: almalinux:9
+          - distro: Alpine latest
+            slug: alpine-latest
+            image: alpine:latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Baixar AppImage do build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dracaena-x86_64-AppImage
+          path: dist/appimage
+      - name: Testar em ${{ matrix.distro }} sem instalar pacotes
+        env:
+          MATRIX_ONLY: ${{ matrix.image }}
+          MATRIX_REPORT: dist/appimage/matriz-${{ matrix.slug }}.md
+        run: bash packaging/appimage/matrix.sh dist/appimage/dracaena-x86_64.AppImage
+      - name: Publicar linha da matriz
+        if: ${{ always() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: matriz-${{ matrix.slug }}
+          path: dist/appimage/matriz-${{ matrix.slug }}.md
+          if-no-files-found: warn
+          retention-days: 14

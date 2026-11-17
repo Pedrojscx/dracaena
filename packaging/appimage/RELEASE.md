@@ -73,14 +73,44 @@ Não sobrou diretório em `TMPDIR`.
 `doctor` sai com 1 quando faltam dependências externas, como o Claude Code. Isso
 é esperado no ambiente limpo do teste.
 
-Observação: neste host, `install-browser` responde `{"ok": false, ...}` porque o
-navegador padrão detectado não é Chromium e não responde ao CDP. A resposta é
-coerente com a regra de navegador configurado ou detectado primeiro, mas ainda
-falta confirmar se o Chromium embutido é usado como fallback nesse caso.
+### Escolha do navegador
+
+O Dracaena escolhe o navegador nesta ordem:
+
+1. `BROWSER_BIN` informado nas configurações. Se não for um Chromium válido, o
+   Dracaena para com erro e não troca de navegador sozinho.
+2. O navegador padrão do sistema, quando é Chromium (Chrome, Chromium, Edge, Brave,
+   Vivaldi, Opera ou outro que responda ao CDP).
+3. O Chromium embutido no AppImage, quando não há navegador configurado e o padrão
+   detectado não serve (por exemplo, Firefox) ou não existe nenhum. Não há download:
+   o Chromium já vem no pacote, e `BROWSER_FALLBACK=playwright` (padrão) o mantém ativo.
+
+Com o padrão incompatível, `doctor` e `install-browser` informam que o Chromium
+embutido será usado em vez de acusar erro. O job `compatibilidade` do CI confere os
+três cenários (Firefox padrão, Chromium padrão e nenhum navegador) em cada imagem.
+
+### Sandbox do Chromium embutido no Ubuntu 24.04
+
+O Ubuntu 24.04 restringe, por AppArmor, a criação de user namespaces por programas sem
+perfil (`kernel.apparmor_restrict_unprivileged_userns`). O Chromium embutido depende
+deles para o sandbox e pode não iniciar. O Dracaena nunca desliga o sandbox por conta
+própria. Quando o Chromium embutido encerra com erro de sandbox, o erro explica a causa
+e as opções:
+
+- criar um perfil AppArmor que permita `userns` para o executável do Chromium embutido;
+- ou ajustar o `sysctl` `kernel.apparmor_restrict_unprivileged_userns`;
+- ou, como último recurso, aceitar o risco com `DRACAENA_CHROMIUM_NO_SANDBOX=1`.
+
+`DRACAENA_CHROMIUM_NO_SANDBOX=1` inicia o Chromium embutido com `--no-sandbox` e
+registra um aviso no log. Vale só para o Chromium embutido: um navegador do sistema ou
+o informado em `BROWSER_BIN` nunca recebe `--no-sandbox`. Sem esse sandbox, uma página
+maliciosa tem menos barreiras contra o sistema; use só em máquinas e sites de confiança.
 
 Ainda não verificado: sessão real de navegador com o Chromium embutido em outras
 distribuições, o daemon real respondendo a uma atividade de verdade e execução em
-glibc exatamente 2.35 fora do contêiner de build. Os testes da branch servem para isso.
+glibc exatamente 2.35 fora do contêiner de build. Também falta confirmar o
+comportamento do sandbox em um Ubuntu 24.04 real, com a restrição de AppArmor ativa.
+Os testes da branch servem para isso.
 
 ## Build e CI
 
@@ -89,6 +119,10 @@ glibc exatamente 2.35 fora do contêiner de build. Os testes da branch servem pa
   por disparo manual (`workflow_dispatch`). Ele faz o build no contêiner `ubuntu:22.04`
   fixado por digest, roda `verify.sh` sem o Python do sistema e publica o AppImage
   como artefato do workflow por 14 dias.
+- Job `compatibilidade`: roda `packaging/appimage/matrix.sh` em 11 imagens limpas (Ubuntu
+  20.04/22.04/24.04, Debian 11/12, Fedora, Arch, openSUSE Tumbleweed, AlmaLinux 8/9 e
+  Alpine), sem instalar pacotes, e publica uma linha da matriz por imagem. As imagens com
+  glibc anterior à 2.35 e o Alpine (musl) são esperadas como falha nesta release.
 
 Detalhes técnicos do empacotamento estão em [`README.md`](README.md).
 
