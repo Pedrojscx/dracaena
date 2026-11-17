@@ -11,9 +11,9 @@ o entry point `dracaena.cli:main`, sem alterar a aplicação.
 
 Python e appimagetool têm SHA-256 fixado; PyInstaller e suas dependências têm
 versão e SHA-256 fixados em `requirements-build.txt`, inclusive transitivas.
-O pip exige hashes e aceita somente wheels. O runtime AppImageKit 13 também tem hash
-fixo, o que impede o download implícito de um runtime variável pelo appimagetool. Fontes: python.org,
-pypi.org e releases oficiais AppImage. Os pacotes do sistema e a imagem
+O pip exige hashes e aceita somente wheels. O runtime estático type2 `20251108` também tem
+hash fixo (ver "Runtime estático"), o que impede o download implícito de um runtime variável
+pelo appimagetool. Fontes: python.org, pypi.org e releases oficiais AppImage. Os pacotes do sistema e a imagem
 ubuntu:22.04 recebem atualizações; o `apt-get` não é fixado por versão ou snapshot.
 Este build não promete identidade bit a bit.
 
@@ -27,13 +27,13 @@ artificial. O launcher usa apenas builtins do shell: funciona com PATH vazio.
 Diretórios relativos e links simbólicos nos diretórios são resolvidos por
 `cd -P`/`pwd -P`. Sem runtime e sem `$APPDIR`, um link simbólico avulso para o
 AppRun fora do AppDir não é resolvido (não há `readlink`); defina `APPDIR`.
-No modo FUSE o runtime precisa de `fusermount` no PATH; sem ele, use
-`APPIMAGE_EXTRACT_AND_RUN=1`.
+No modo FUSE o runtime precisa de `fusermount3` ou `fusermount` no PATH e de `/dev/fuse`;
+sem eles, use `APPIMAGE_EXTRACT_AND_RUN=1`. Não é preciso `libfuse2`.
 
 Playwright 1.64.1, seu driver e dependências entram no pacote, com versões e
-SHA-256 fixados. O squashfs usa compressão xz. Como o compressor embutido no empacotador
-só aceita zstd, o build extrai a ferramenta verificada e substitui seu
-`mksquashfs` pelo pacote autenticado `squashfs-tools` da distribuição. O Chromium
+SHA-256 fixados. O squashfs usa compressão zstd, a única que o runtime estático lê, com o
+`mksquashfs` que já vem no appimagetool 1.9.1 (SHA-256 fixo); o build não substitui
+mais o compressor. O Chromium
 reserva (Chrome for Testing 156.0.8078.4, revisão 1248, SHA-256 fixado) é embutido
 somente leitura em `_internal/dracaena-browsers`. `entry.py` aponta o fallback do
 Playwright para essa cópia, no lugar do download para a pasta de dados do usuário.
@@ -47,11 +47,14 @@ Saídas adicionais: `bundled-sizes.txt` (bytes por arquivo, maior primeiro) e
 
 Verificação independente pertence a `verify.sh`, entregue separadamente.
 Para rodar sem FUSE, use `APPIMAGE_EXTRACT_AND_RUN=1`.
-No modo `--appimage-extract-and-run` o runtime extrai o pacote para um diretório
-temporário, que respeita `TMPDIR`. Na medição do runtime 13 (`--version`) nenhum
-`appimage_extracted_*` ficou em `TMPDIR` após a saída; esse comportamento não é
-garantido pelo formato e o `check-cases.py` o registra apenas como informação.
-Na branch `release/appimage-v0.1.0`, `--help` lista os dez subcomandos, `--version`
+No modo `--appimage-extract-and-run` o runtime extrai o pacote (cerca de 600 MB) para
+`$TMPDIR/appimage_extracted_<md5 do arquivo>` e **não o apaga ao sair** (medido com
+strace: `wait4` e `exit_group`, sem `unlink`; o AppImageKit 13 apagava). O nome do diretório
+depende do conteúdo do arquivo, então execuções seguintes com o mesmo `TMPDIR` o reutilizam
+(`--version` cai de ~1,5 s para ~0,5 s), mas cada versão nova do AppImage deixa outro
+diretório. No modo FUSE sobra só um diretório vazio `.mount_*` em `TMPDIR`. O `check-cases.py`
+apaga o `TMPDIR` de cada caso para não encher o `/tmp`. Na branch
+`release/appimage-v0.1.0`, `--help` lista os dez subcomandos, `--version`
 está disponível e o daemon real está incluído (modo simulação por padrão, via
 `DRY_RUN`). Notas da release: [`RELEASE.md`](RELEASE.md).
 
@@ -60,8 +63,11 @@ está disponível e o daemon real está incluído (modo simulação por padrão,
 - **glibc 2.35 ou mais nova** (Linux x86_64). O build roda em ubuntu:22.04 e o maior
   símbolo exigido pelos binários do pacote é `GLIBC_2.35` (medido com `objdump -T`).
   Distribuições com glibc mais velha não são suportadas.
+- **FUSE:** o runtime é estático e não liga `libfuse.so.2`. O modo FUSE precisa só de
+  `/dev/fuse` e de `fusermount3` ou `fusermount` (pacote `fuse3`, já presente na maioria dos
+  desktops). Em Ubuntu 22.04+ o modo FUSE dispensa `libfuse2` (medido em contêiner; o Zorin 17/18, base Ubuntu, não foi testado).
 - **Sem FUSE:** `--appimage-extract-and-run` (ou `APPIMAGE_EXTRACT_AND_RUN=1`) extrai o
-  pacote em um diretório temporário sob `TMPDIR` (padrão `/tmp`). O pacote com driver ocupa mais espaço que os 51 MiB da versão anterior. Veja a seção de extração acima sobre resíduos.
+  pacote (~600 MB) em `TMPDIR` (padrão `/tmp`) e o deixa lá. Veja a seção de extração acima.
 - **python-xlib** (atalho global X11) fica fora do AppImage da fase 1. Ele vem de
   `requirements.txt` só para a UI. O build usa `requirements-build.txt`, que não o lista,
   e o pacote não tem arquivos `xlib`.
@@ -81,10 +87,17 @@ confirmação pendente, provando que o driver inicializou sem baixar o navegador
 O download e a abertura do Chromium exigem um teste separado com as bibliotecas
 de desktop instaladas. Incluir o driver não inclui essas bibliotecas do sistema.
 
-## Runtime xz
+## Runtime estático
 
-O runtime de 20251108 não lê squashfs com xz. Este build usa o runtime oficial
-AppImageKit 13, com SHA-256 fixo. O modo FUSE precisa de libfuse2 no Ubuntu 22.04
-ou libfuse2t64 no Ubuntu 24.04. Sem FUSE, use `--appimage-extract-and-run`.
-O runtime é mais antigo; as verificações no Ubuntu cobrem extração e o daemon
-simulado. Elas não provam que o daemon real nem uma sessão de navegador funcionam.
+Fonte: [`AppImage/type2-runtime`](https://github.com/AppImage/type2-runtime), release fixa
+`20251108` (commit `dd6cebe`, nunca `continuous`), arquivo `runtime-x86_64`,
+SHA-256 `2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d`
+(a release também publica a assinatura `runtime-x86_64.sig`, chave
+`570C 77AC EA40 C0F1 B758  902C BF96 CCA5 6490 F695`). O binário é static-pie sem
+entradas `NEEDED` (`objdump -p`), carrega o FUSE embutido e não usa `libfuse.so.2`.
+Do host ele ainda exige `/dev/fuse` e `fusermount3` ou `fusermount` no PATH; sem eles
+sai com `No suitable fusermount binary found on the $PATH`. A compressão usada é zstd; o xz
+não é lido, segundo o registro da fase anterior (não retestado aqui). O empacotador é o
+appimagetool 1.9.1 (SHA-256 `ed4ce84f...384eb0`), cujo `mksquashfs` só gera zstd.
+O appimagetool regrava seções do runtime, então o SHA-256 do trecho embutido no AppImage
+difere do arquivo baixado.
