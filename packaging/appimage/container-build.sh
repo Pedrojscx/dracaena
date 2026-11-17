@@ -18,7 +18,7 @@ dnf install -y --setopt=install_weak_deps=False --setopt=gpgcheck=1 xz openssl-d
 WORK=$(mktemp -d /tmp/dracaena-build.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 fetch() {
-  curl --fail --location --retry 10 --retry-delay 2 --retry-all-errors \
+  curl --fail --location --retry 10 --retry-delay 2 --retry-connrefused \
     --connect-timeout 30 --proto '=https' --tlsv1.2 "$1" -o "$2" >&2
   printf '%s  %s\n' "$3" "$2" | sha256sum --check >&2
 }
