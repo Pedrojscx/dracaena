@@ -55,7 +55,8 @@ APPIMAGE_EXTRACT_AND_RUN=1 ./dracaena-x86_64.AppImage --version
 
 Distribuições que atendem a glibc 2.28, como referência: Ubuntu 20.04+, Debian 10+,
 RHEL/Rocky/AlmaLinux 8+, Fedora 29+, Linux Mint 20+, Pop!_OS 20.04+, Zorin 16+,
-Arch/Manjaro atuais, openSUSE Leap 15.1+ e Tumbleweed.
+Arch/Manjaro atuais, openSUSE Leap 15.3+ e Tumbleweed. Só as imagens da matriz foram medidas; as demais
+são deduzidas da versão de glibc de cada distribuição.
 
 Não suportados nesta release: distribuições com glibc mais antiga que a 2.28 (CentOS 7, Ubuntu 18.04),
 Alpine e outras distribuições musl, ARM, macOS e Windows. Para essas plataformas é preciso um
@@ -99,8 +100,8 @@ Regressões verificadas:
   host). Agora o Chromium fica fora da análise do PyInstaller, o pacote só leva as bibliotecas do
   Python e `entry.py` devolve o `LD_LIBRARY_PATH` original aos filhos. Verificado no Ubuntu 22.04
   com as bibliotecas de desktop instaladas: `doctor` abre o Chromium embutido por CDP com
-  `LD_LIBRARY_PATH` vazio. Em Ubuntu 24.04 e Debian 12 só foi testado o `chrome` direto, sem o `LD_LIBRARY_PATH`
-  do PyInstaller.
+  `LD_LIBRARY_PATH` vazio. O `chrome` direto, sem o `LD_LIBRARY_PATH` do PyInstaller, também abriu no Debian 12; o teste com
+  `doctor` não foi repetido nele nem no Ubuntu 24.04 (que ainda tem a restrição de AppArmor).
 
 Ressalvas: o Python embutido passa a usar OpenSSL 1.1.1k (AlmaLinux 8, corrigido pela Red Hat, mas fora do
 suporte upstream); o app só usa HTTP local (CDP). O bootloader do PyInstaller continua o do wheel
