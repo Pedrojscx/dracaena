@@ -4,8 +4,10 @@
 # Mede a compatibilidade do AppImage em imagens limpas, sem instalar pacotes.
 # Cada contêiner extrai o AppDir uma única vez e reutiliza essa extração para
 # --version, --help, doctor, daemon --simulate + IPC e a escolha do navegador
-# (Firefox padrão, Chromium padrão, nenhum). O teste FUSE é separado
-# porque exige permissões do host.
+# (Firefox padrão, Chromium padrão, nenhum). Os testes FUSE são separados
+# porque exigem permissões do host: um na imagem limpa (sem fusermount não há
+# montagem e o runtime orienta o uso de extract-and-run) e outro numa imagem
+# com fuse3 instalado na hora, que prova que o runtime estático dispensa libfuse2.
 set -euo pipefail
 
 usage() {
@@ -99,8 +101,8 @@ ARTIFACT_SHA="$(sha256sum "$APPIMAGE" | awk '{print $1}')"
     echo 'As imagens são executadas sem instalação de pacotes. **N-T** significa não testado.'
     echo
     # shellcheck disable=SC2016  # crases Markdown literais
-    echo '| Distro | libc da imagem | `--version` | `--help` | `doctor` | daemon + IPC | navegador | extract-and-run | FUSE | Primeira linha do erro |'
-    echo '|---|---|---:|---:|---:|---:|---:|---:|---:|---|'
+    echo '| Distro | libc da imagem | `--version` | `--help` | `doctor` | daemon + IPC | navegador | extract-and-run | FUSE (limpa) | FUSE (+fuse3) | Primeira linha do erro |'
+    echo '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|'
 } >"$REPORT"
 
 first_line() {
@@ -296,25 +298,60 @@ CONTAINER_SH
     return 0
 }
 
-run_fuse() { # imagem diretório-da-linha; imprime status
-    local image="$1" rowdir="$2" rc=0 line=''
+# Instala fuse3 (sem libfuse2) no contêiner e roda o AppImage em modo FUSE.
+# Códigos de saída 90-92 significam "não foi possível testar", não falha do pacote.
+# shellcheck disable=SC2016  # o script roda no contêiner; nada deve expandir aqui
+FUSE3_SH='
+set -u
+if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    install() { apt-get update -qq && apt-get install -y -qq --no-install-recommends fuse3; }
+elif command -v dnf >/dev/null 2>&1; then install() { dnf install -y -q fuse3; }
+elif command -v zypper >/dev/null 2>&1; then install() { zypper -n -q install fuse3; }
+elif command -v pacman >/dev/null 2>&1; then install() { pacman -Sy --noconfirm fuse3; }
+elif command -v apk >/dev/null 2>&1; then install() { apk add -q fuse3; }
+else echo "gerenciador de pacotes desconhecido"; exit 90; fi
+install >/tmp/fuse3-install.log 2>&1 || { echo "falha ao instalar fuse3: $(tail -n 1 /tmp/fuse3-install.log)"; exit 90; }
+command -v fusermount3 >/dev/null 2>&1 || { echo "fusermount3 ausente após instalar fuse3"; exit 90; }
+for dir in /lib /lib64 /usr/lib /usr/lib64; do
+    if [ -d "$dir" ] && find "$dir" -name "libfuse.so.2*" 2>/dev/null | grep -q .; then
+        echo "libfuse2 presente na imagem: o teste não provaria a ausência dela"; exit 92
+    fi
+done
+exec /work/app.AppImage --version
+'
+
+fuse_not_testable() { # modo rc arquivo-de-saída
+    if [[ "$1" == fuse3 ]]; then
+        [[ "$2" -ge 90 && "$2" -le 92 ]]
+    else
+        [[ "$2" -eq 125 ]] || grep -Eqi 'operation not permitted|permission denied|error gathering device|no such file.*fuse|libfuse\.so\.2|fusermount' "$3"
+    fi
+}
+
+run_fuse() { # imagem diretório-da-linha modo(limpa|fuse3); imprime status
+    local image="$1" rowdir="$2" mode="$3" rc=0 line='' out
+    out="$rowdir/fuse-$mode.out"
     if [[ ! -c /dev/fuse ]]; then
         echo 'N-T'
-        echo 'host sem /dev/fuse' >"$rowdir/fuse.reason"
+        echo 'host sem /dev/fuse' >"$rowdir/fuse-$mode.reason"
         return 0
     fi
-    timeout --kill-after=10 90 docker run --rm --platform linux/amd64 --network none \
-        --device /dev/fuse --cap-add SYS_ADMIN \
-        --mount "type=bind,source=$APPIMAGE,target=/work/app.AppImage,readonly" \
-        "$image" /work/app.AppImage --version >"$rowdir/fuse.out" 2>&1 || rc=$?
-    IFS= read -r line <"$rowdir/fuse.out" || true
+    local -a args=(--platform linux/amd64 --device /dev/fuse --cap-add SYS_ADMIN
+        --mount "type=bind,source=$APPIMAGE,target=/work/app.AppImage,readonly")
+    if [[ "$mode" == fuse3 ]]; then
+        timeout --kill-after=10 300 docker run --rm "${args[@]}" "$image" sh -c "$FUSE3_SH" >"$out" 2>&1 || rc=$?
+    else
+        timeout --kill-after=10 90 docker run --rm --network none "${args[@]}" "$image" /work/app.AppImage --version >"$out" 2>&1 || rc=$?
+    fi
+    IFS= read -r line <"$out" || true
     if [[ "$rc" -eq 0 && "$line" == 'dracaena '[0-9]* ]]; then
         echo 'OK'
-    # Sem libfuse2/fusermount na imagem também é N-T: é requisito documentado do
-    # host (RELEASE.md), e o modo extract-and-run, obrigatório, cobre esse caso.
-    elif [[ "$rc" -eq 125 ]] || grep -Eqi 'operation not permitted|permission denied|error gathering device|no such file.*fuse|libfuse\.so\.2|fusermount' "$rowdir/fuse.out"; then
+    # Imagem limpa sem fusermount: o runtime orienta usar extract-and-run, é N-T.
+    # Com fuse3 instalado, só os códigos 90-92 (instalação/ambiente) são N-T; o resto é FALHA.
+    elif fuse_not_testable "$mode" "$rc" "$out"; then
         echo 'N-T'
-        cp "$rowdir/fuse.out" "$rowdir/fuse.reason"
+        cp "$out" "$rowdir/fuse-$mode.reason"
     else
         echo 'FALHA'
     fi
@@ -347,23 +384,27 @@ for spec in "${IMAGES[@]}"; do
         error="$(first_line "$rowdir/docker.out")"
     fi
 
-    fuse="$(run_fuse "$image" "$rowdir")"
-    if [[ "$fuse" == FALHA && -z "$error" ]]; then
-        error="$(first_line "$rowdir/fuse.out")"
-    elif [[ "$fuse" == N-T && -z "$error" && -f "$rowdir/fuse.reason" ]]; then
-        error="$(first_line "$rowdir/fuse.reason")"
-    fi
+    fuse="$(run_fuse "$image" "$rowdir" limpa)"
+    fuse3="$(run_fuse "$image" "$rowdir" fuse3)"
+    for mode in limpa fuse3; do
+        status=$fuse; [[ "$mode" == fuse3 ]] && status=$fuse3
+        if [[ "$status" == FALHA && -z "$error" ]]; then
+            error="$(first_line "$rowdir/fuse-$mode.out")"
+        elif [[ "$status" == N-T && -z "$error" && -f "$rowdir/fuse-$mode.reason" ]]; then
+            error="$(first_line "$rowdir/fuse-$mode.reason")"
+        fi
+    done
     [[ -n "$error" ]] || error='—'
 
     label="$distro"
     [[ -z "$unsupported" ]] || label="$distro (não suportado, falha esperada: $unsupported)"
-    printf '| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n' \
+    printf '| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n' \
         "$(markdown "$label")" "$(markdown "$libc")" "$version" "$help" "$doctor" \
-        "$daemon" "$browser" "$extract" "$fuse" "$(markdown "$error")" >>"$REPORT"
+        "$daemon" "$browser" "$extract" "$fuse" "$fuse3" "$(markdown "$error")" >>"$REPORT"
 
     failed_here=0
     if [[ "$version" == FALHA || "$help" == FALHA || "$doctor" == FALHA \
-        || "$daemon" == FALHA || "$browser" == FALHA || "$extract" == FALHA || "$fuse" == FALHA ]]; then
+        || "$daemon" == FALHA || "$browser" == FALHA || "$extract" == FALHA || "$fuse" == FALHA || "$fuse3" == FALHA ]]; then
         failed_here=1
     fi
     if [[ -n "$unsupported" ]]; then
