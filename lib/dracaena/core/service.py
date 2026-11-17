@@ -29,6 +29,7 @@ from urllib.request import urlopen
 
 from ..adapters.base import Registry
 from ..guard import Guard, Refused, ResultScreen
+from ..platform.browser import BrowserSandboxUnavailable
 from ..platform.paths import data_dir
 from . import claude, contract
 from .errors import AdapterError, NotFound, ServiceError
@@ -110,7 +111,7 @@ class Service:
         self._sleep, self._mono, self._once_wait = sleep, monotonic, once_wait
         self._lock = threading.RLock()
         self._cond = threading.Condition(self._lock)
-        self.state, self.site, self.error = "idle", "", ""
+        self.state, self.site, self.error, self.condition = "idle", "", "", ""
         self.count, self.maximum = 0, int(max_questions or 0)
         self._closed = False
         self._gen = 0              # geração do laço atual; laço de geração antiga não muda nada
@@ -140,7 +141,7 @@ class Service:
             if not self._closed:
                 self._gen += 1
                 self._oneshot = None
-                self._set(state="idle", error="")
+                self._set(state="idle", error="", condition="")
                 self._closed = True
                 self._events.put(_END_EVENTS)
             worker, dispatcher = self._thread, self._dispatcher
@@ -211,8 +212,11 @@ class Service:
     # ---- estado
     def snapshot(self) -> dict:
         with self._lock:
-            return {"state": self.state, "site": self.site, "question": self.count, "max": self.maximum,
-                    "error": self.error, "dry_run": self.dry_run}
+            result = {"state": self.state, "site": self.site, "question": self.count, "max": self.maximum,
+                      "error": self.error, "dry_run": self.dry_run}
+            if self.condition:
+                result["condition"] = self.condition
+            return result
 
     def _set(self, gen: int | None = None, **changes) -> bool:
         """Muda o estado e emite ``state``; com ``gen``, só se o laço ainda for o atual."""
@@ -254,7 +258,7 @@ class Service:
                     raise ServiceError("bad_state", "Nada em execução para parar")
                 self._gen += 1        # o laço antigo encerra sem agir mais
                 self._oneshot = None
-                self._set(state="idle", error="")
+                self._set(state="idle", error="", condition="")
                 self._log("parada: pedida pelo usuário")
                 return self.snapshot()
             if cmd == "toggle" and state == "running":
@@ -278,7 +282,7 @@ class Service:
             mode = "loop" if cmd == "toggle" else cmd
             self._thread = threading.Thread(target=self._work, args=(gen, mode, contains, previous),
                                             name="dracaena-loop", daemon=True)
-            self._set(state="running", error="", count=0, maximum=maximum, site="")
+            self._set(state="running", error="", condition="", count=0, maximum=maximum, site="")
             self._thread.start()
             return self.snapshot()
 
@@ -313,9 +317,9 @@ class Service:
         with self._lock:
             return gen != self._gen or self._oneshot != shot or (self.state == "paused" and shot is None)
 
-    def _fail(self, gen: int, msg: str) -> None:
+    def _fail(self, gen: int, msg: str, condition: str = "") -> None:
         self._log(f"erro: {msg}", "error")
-        self._set(gen, state="error", error=msg)
+        self._set(gen, state="error", error=msg, condition=condition)
 
     def _work(self, gen, mode, contains, previous) -> None:
         if previous is not None:
@@ -341,6 +345,8 @@ class Service:
                     self._loop(gen, mode, page, adapter, cfg)
                 finally:
                     browser.close()
+        except BrowserSandboxUnavailable as exc:
+            self._fail(gen, str(exc), exc.condition)
         except ServiceError as exc:
             self._fail(gen, exc.msg)
         except AdapterError as exc:

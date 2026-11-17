@@ -18,6 +18,7 @@ from dracaena.adapters.base import Registry
 from dracaena.core.errors import ServiceError
 from dracaena.core.model import Option, Question, Target, Verdict
 from dracaena.core.service import Service, default_endpoint
+from dracaena.platform.browser import BrowserSandboxUnavailable
 
 SINGLE = '{"type":"SINGLE","answers":[0]}'
 
@@ -339,6 +340,16 @@ class ErrorTests(ServiceCase):
         self.svc.handle("toggle", {})
         self.assertTrue(self.state("error"))
         self.assertEqual(self.svc.error, "sem navegador")
+
+    def test_sandbox_failure_reaches_state_with_its_condition(self):
+        def blocked():
+            raise BrowserSandboxUnavailable("sandbox indisponível")
+        self.make(endpoint=blocked)
+        self.svc.handle("toggle", {})
+        self.assertTrue(self.state("error"))
+        event = self.kinds("state")[-1]
+        self.assertEqual((event["error"], event["condition"]),
+                         ("sandbox indisponível", "sandbox_unavailable"))
 
     def test_default_endpoint_without_profile(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"XDG_DATA_HOME": tmp, "APPDATA": tmp}):

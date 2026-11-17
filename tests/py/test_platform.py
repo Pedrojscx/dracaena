@@ -1,4 +1,5 @@
 import json
+import io
 import os
 from pathlib import Path
 import socket
@@ -128,6 +129,64 @@ class PlatformTests(unittest.TestCase):
         with patch.object(browser, "default_browser", side_effect=browser.BrowserUnsupported("Flatpak")):
             with self.assertRaises(browser.BrowserUnsupported):
                 browser.resolve()
+
+
+class LaunchSandboxTests(unittest.TestCase):
+    class FailedProcess:
+        pid = 123
+
+        def __init__(self, output=b""):
+            self.stderr = io.BytesIO(output)
+
+        def poll(self):
+            return 1
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 1
+
+    def test_sandbox_diagnostics_are_recognized_without_guessing_other_errors(self):
+        self.assertTrue(browser.sandbox_failure("No usable sandbox! Update your kernel"))
+        self.assertTrue(browser.sandbox_failure("Failed to move to new namespace: Operation not permitted"))
+        self.assertFalse(browser.sandbox_failure("Permission denied while opening the profile"))
+
+    def test_fallback_sandbox_failure_has_actionable_portuguese_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Path(directory) / "profile"
+            profile.mkdir()
+
+            def popen(_command, **_kwargs):
+                return self.FailedProcess(b"Failed to move to new namespace: Operation not permitted")
+
+            with patch.object(browser, "_resolve_launch", return_value=("/reserva/chromium", True)), \
+                    patch.object(browser, "private_dir", return_value=profile), \
+                    patch("psutil.process_iter", return_value=[]), patch.object(browser.subprocess, "Popen", popen):
+                with self.assertRaises(browser.BrowserSandboxUnavailable) as ctx:
+                    browser.launch(fallback="playwright")
+        message = str(ctx.exception)
+        self.assertIn("perfil AppArmor", message)
+        self.assertIn("sysctl", message)
+        self.assertIn("DRACAENA_CHROMIUM_NO_SANDBOX=1", message)
+
+    def test_no_sandbox_requires_exact_opt_in_and_only_applies_to_fallback(self):
+        with patch.dict(os.environ, {browser.NO_SANDBOX_ENV: "0"}):
+            self.assertNotIn("--no-sandbox", browser._launch_args("chromium", "/perfil", "about:blank", True))
+        with patch.dict(os.environ, {browser.NO_SANDBOX_ENV: "1"}), self.assertLogs("dracaena", "WARNING") as logs:
+            args = browser._launch_args("chromium", "/perfil", "about:blank", True)
+        self.assertIn("--no-sandbox", args)
+        self.assertIn("SEM SANDBOX", " ".join(logs.output))
+        with patch.dict(os.environ, {browser.NO_SANDBOX_ENV: "1"}):
+            self.assertNotIn("--no-sandbox", browser._launch_args("chromium", "/perfil", "about:blank", False))
+
+    def test_launch_knows_whether_resolve_selected_the_fallback(self):
+        with patch.object(browser, "resolve", side_effect=[browser.NoBrowser("ausente"), "/reserva/chromium"]) as resolve:
+            self.assertEqual(browser._resolve_launch("", "playwright"), ("/reserva/chromium", True))
+        self.assertEqual(resolve.call_count, 2)
+        with patch.object(browser, "resolve", return_value="/usr/bin/chromium") as resolve:
+            self.assertEqual(browser._resolve_launch("", "playwright"), ("/usr/bin/chromium", False))
+        resolve.assert_called_once_with("", "")
 
 
 class FallbackDownloadTests(unittest.TestCase):

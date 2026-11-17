@@ -4,6 +4,7 @@ import contextlib
 import importlib
 import ipaddress
 import json
+import logging
 import os
 from pathlib import Path
 import shlex
@@ -11,9 +12,12 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 from urllib.request import ProxyHandler, build_opener, urlopen
 from .paths import data_dir, private_dir
+
+LOG = logging.getLogger("dracaena")
 
 
 class BrowserError(RuntimeError):
@@ -36,8 +40,26 @@ class FallbackUnavailable(BrowserError):
     """Esta instalação não traz o módulo do Chromium reserva; não há o que baixar."""
 
 
+class BrowserSandboxUnavailable(BrowserError):
+    """O Chromium reserva não conseguiu criar o sandbox do processo."""
+
+    condition = "sandbox_unavailable"
+
+
 BROWSERS_KEY = "PLAYWRIGHT_BROWSERS_PATH"
+NO_SANDBOX_ENV = "DRACAENA_CHROMIUM_NO_SANDBOX"
 FALLBACK_SIZE = "400 MB"  # espaço em disco do Chromium (sem o headless shell)
+SANDBOX_ERROR = (
+    "O Chromium reserva não iniciou porque o sandbox do sistema está indisponível. "
+    "Crie um perfil AppArmor que permita userns para o executável ou ajuste o sysctl "
+    "kernel.apparmor_restrict_unprivileged_userns. Como último recurso, aceite o risco "
+    f"explicitamente com {NO_SANDBOX_ENV}=1."
+)
+_SANDBOX_MARKERS = (
+    "no usable sandbox",
+    "suid sandbox helper binary was found, but is not configured correctly",
+    "running as root without --no-sandbox is not supported",
+)
 
 
 CHROMIUM_NAMES = ("chromium", "google chrome", "microsoft edge", "vivaldi", "brave", "opera")
@@ -425,9 +447,62 @@ def read_port(profile):
     return int(lines[0])
 
 
+def sandbox_failure(output):
+    """Reconhece diagnósticos do Chromium quando userns/SUID não podem criar o sandbox."""
+    text = str(output or "").lower()
+    if any(marker in text for marker in _SANDBOX_MARKERS):
+        return True
+    return "operation not permitted" in text and any(word in text for word in ("namespace", "sandbox", "userns"))
+
+
+def _resolve_launch(executable, fallback):
+    """Resolve o binário e informa se veio do fallback, sem confundir navegador do sistema."""
+    if executable or not fallback:
+        return resolve(executable, fallback), False
+    try:
+        return resolve("", ""), False
+    except NoBrowser:
+        return resolve("", fallback), True
+
+
+class _StderrTail:
+    """Drena stderr sem bloquear o Chromium e conserva só os últimos bytes."""
+
+    def __init__(self, stream, limit=16 * 1024):
+        self.stream, self.limit = stream, limit
+        self.data = bytearray()
+        self.lock = threading.Lock()
+        self.thread = threading.Thread(target=self._drain, name="dracaena-browser-stderr", daemon=True)
+        self.thread.start()
+
+    def _drain(self):
+        while True:
+            chunk = self.stream.read(4096)
+            if not chunk:
+                return
+            with self.lock:
+                self.data.extend(chunk)
+                del self.data[:-self.limit]
+
+    def text(self):
+        self.thread.join(.2)
+        with self.lock:
+            return bytes(self.data).decode("utf-8", "replace")
+
+
+def _launch_args(binary, profile, url, fallback_used):
+    args = [binary, "--user-data-dir=" + str(profile), "--remote-debugging-port=0",
+            "--remote-debugging-address=127.0.0.1", "--no-first-run", "--no-default-browser-check"]
+    if fallback_used and os.environ.get(NO_SANDBOX_ENV) == "1":
+        args.append("--no-sandbox")
+        LOG.warning("Chromium reserva iniciado SEM SANDBOX por opt-in explícito (%s=1)", NO_SANDBOX_ENV)
+    args.append(url)
+    return args
+
+
 def launch(executable="", fallback="", url="about:blank", timeout=15):
     import psutil
-    binary = resolve(executable, fallback)
+    binary, fallback_used = _resolve_launch(executable, fallback)
     profile = private_dir(data_dir() / "browser-profile")
     active = profile / "DevToolsActivePort"
     # A live owner keeps its endpoint; never delete its DevToolsActivePort.
@@ -438,13 +513,15 @@ def launch(executable="", fallback="", url="about:blank", timeout=15):
                 for i, argument in enumerate(arguments)):
             raise BrowserError("O perfil dedicado já está aberto; encerre-o antes de reiniciar")
     active.unlink(missing_ok=True)
-    proc = subprocess.Popen([binary, "--user-data-dir=" + str(profile), "--remote-debugging-port=0",
-                             "--remote-debugging-address=127.0.0.1", "--no-first-run", "--no-default-browser-check", url],
-                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen(_launch_args(binary, profile, url, fallback_used), stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    errors = _StderrTail(proc.stderr)
     deadline = time.monotonic() + timeout
     try:
         while time.monotonic() < deadline:
             if proc.poll() is not None:
+                if fallback_used and sandbox_failure(errors.text()):
+                    raise BrowserSandboxUnavailable(SANDBOX_ERROR)
                 raise BrowserError("O navegador encerrou antes de o CDP ficar pronto (o perfil pode já estar aberto)")
             try:
                 port = read_port(profile)
@@ -465,6 +542,8 @@ def launch(executable="", fallback="", url="about:blank", timeout=15):
                 return {"port": port, "profile": str(profile), "pid": proc.pid}
             except (FileNotFoundError, ConnectionError, TimeoutError):
                 time.sleep(.1)
+        if fallback_used and sandbox_failure(errors.text()):
+            raise BrowserSandboxUnavailable(SANDBOX_ERROR)
         raise BrowserError("Tempo esgotado aguardando o DevToolsActivePort")
     except BaseException:
         proc.terminate()
