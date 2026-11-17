@@ -1,0 +1,63 @@
+name: AppImage
+# Gera o AppImage com o mesmo script do build local
+# (packaging/appimage/container-build.sh dentro de ubuntu:22.04), verifica que
+# ele roda sem o Python do sistema e publica o arquivo como artefato do
+# workflow. Só roda em tag ou disparo manual; nada aqui roda em pull_request.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      require_version:
+        description: 'Exigir "--version"/"-V" na verificação (desligue só para commits anteriores a ele)'
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: appimage-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  # ubuntu:22.04 fixado por digest; o mesmo para o build e para a verificação.
+  BUILD_IMAGE: ubuntu:22.04@sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c
+  OUT_DIR: dist/appimage
+jobs:
+  appimage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Build no contêiner ubuntu:22.04
+        id: build
+        run: |
+          mkdir -p "$OUT_DIR"
+          docker run --rm --platform linux/amd64 \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/src,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/output" \
+            -e "OUT_DIR=/output/$OUT_DIR" -e "OUTPUT_UID=$(id -u)" -e "OUTPUT_GID=$(id -g)" \
+            -w /src "$BUILD_IMAGE" bash packaging/appimage/container-build.sh
+          test -s "$OUT_DIR/dracaena-x86_64.AppImage"
+          ls -l "$OUT_DIR"
+      - name: Verificar sem Python do sistema (host e contêiner)
+        env:
+          VERIFY_IMAGE: ${{ env.BUILD_IMAGE }}
+          # Em tag, sempre exige; no disparo manual, segue a entrada.
+          VERIFY_VERSION: ${{ (github.event_name == 'workflow_dispatch' && !inputs.require_version) && '0' || '1' }}
+        run: |
+          set -o pipefail
+          bash packaging/appimage/verify.sh "$OUT_DIR/dracaena-x86_64.AppImage" \
+            | tee "$OUT_DIR/verify.log"
+      - name: Publicar artefato
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: dracaena-x86_64-AppImage
+          path: |
+            ${{ env.OUT_DIR }}/dracaena-x86_64.AppImage
+            ${{ env.OUT_DIR }}/bundled-sizes.txt
+            ${{ env.OUT_DIR }}/build-packages.txt
+            ${{ env.OUT_DIR }}/verify.log
+          if-no-files-found: error
+          retention-days: 14
