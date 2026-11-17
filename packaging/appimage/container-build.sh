@@ -10,7 +10,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update >&2
 apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils \
   libssl-dev zlib1g-dev libffi-dev libbz2-dev liblzma-dev libsqlite3-dev \
-  libreadline-dev libncurses-dev libgdbm-dev uuid-dev file desktop-file-utils squashfs-tools unzip >&2
+  libreadline-dev libncurses-dev libgdbm-dev uuid-dev file desktop-file-utils unzip >&2
 WORK=$(mktemp -d /tmp/dracaena-build.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 fetch() {
@@ -52,15 +52,15 @@ PLAYWRIGHT_BROWSERS_PATH="$BROWSERS" "$PY" -c \
   'from pathlib import Path; from playwright.sync_api import sync_playwright; p=sync_playwright().start(); path=Path(p.chromium.executable_path); p.stop(); assert path.is_file(), path'
 fetch https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage \
   "$WORK/appimagetool" ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
-fetch https://github.com/AppImage/AppImageKit/releases/download/13/obsolete-runtime-x86_64 \
-  "$WORK/runtime" 328e0d745c5c6817048c27bc3e8314871703f8f47ffa81a37cb06cd95a94b323
+# Runtime estático oficial (AppImage/type2-runtime, release fixa 20251108, assinada
+# com a chave 570C77ACEA40C0F1B758902CBF96CCA56490F695): não liga libfuse.so.2.
+fetch https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64 \
+  "$WORK/runtime" 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
 chmod +x "$WORK/appimagetool"
-# O compressor embutido só aceita zstd; usar o compressor autenticado do sistema.
+# O AppImage do empacotador precisa de FUSE; no contêiner ele é extraído e usado
+# com o mksquashfs zstd que já vem nele, a única compressão que o runtime lê.
 mkdir "$WORK/tool"
 (cd "$WORK/tool" && "$WORK/appimagetool" --appimage-extract >/dev/null)
-mapfile -t compressors < <(find "$WORK/tool/squashfs-root" -type f -name mksquashfs)
-[[ ${#compressors[@]} -eq 1 ]] || { echo 'Compressor do empacotador não localizado' >&2; exit 2; }
-cp /usr/bin/mksquashfs "${compressors[0]}"
 cd "$ROOT"
 DRACAENA_BUNDLED_BROWSERS="$BROWSERS" "$PY" -m PyInstaller --noconfirm --clean --distpath "$WORK/dist" \
   --workpath "$WORK/freeze" packaging/appimage/dracaena.spec >&2
@@ -72,7 +72,7 @@ chmod +x "$APPDIR/AppRun"
 ln -s dracaena.svg "$APPDIR/.DirIcon"
 desktop-file-validate "$APPDIR/dracaena.desktop"
 ARCH=x86_64 "$WORK/tool/squashfs-root/AppRun" \
-  --comp xz --runtime-file "$WORK/runtime" "$APPDIR" "$OUT_DIR/dracaena-x86_64.AppImage" >&2
+  --comp zstd --runtime-file "$WORK/runtime" "$APPDIR" "$OUT_DIR/dracaena-x86_64.AppImage" >&2
 find "$APPDIR/usr/bin" -type f -printf '%s %P\n' | sort -nr > "$OUT_DIR/bundled-sizes.txt"
 "$PY" -m pip freeze > "$OUT_DIR/build-packages.txt"
 sha256sum "$OUT_DIR/dracaena-x86_64.AppImage" >&2
