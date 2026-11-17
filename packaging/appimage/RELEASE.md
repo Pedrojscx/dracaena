@@ -13,6 +13,7 @@ integração na `main`. **Não é uma versão estável.**
 | Playwright e driver | 1.64.1 |
 | Chromium embutido (Chrome for Testing) | 156.0.8078.4 (revisão 1248) |
 | Runtime AppImage | type2-runtime `20251108` (estático, sem `libfuse2`), squashfs zstd |
+| Base de build | `quay.io/pypa/manylinux_2_28_x86_64` (AlmaLinux 8, glibc 2.28), digest `sha256:d086f64c…fd2c` |
 
 As versões e os SHA-256 de Python, PyInstaller, das dependências pip, do Playwright,
 do Chromium, do runtime e do appimagetool estão fixados. Os pacotes `apt` da imagem
@@ -47,20 +48,63 @@ APPIMAGE_EXTRACT_AND_RUN=1 ./dracaena-x86_64.AppImage --version
 | Requisito | Detalhe |
 | --- | --- |
 | Arquitetura | Somente x86_64. Não há build ARM (aarch64). |
-| glibc | 2.35 ou mais nova (maior símbolo exigido: `GLIBC_2.35`, medido com `objdump -T`). |
+| glibc | **2.28 ou mais nova** (maior símbolo exigido em todos os 78 ELFs: `GLIBC_2.28`, medido com `objdump -T`; o build falha acima disso). |
 | FUSE | **`libfuse2` não é mais necessária.** O modo FUSE precisa só de `/dev/fuse` e de `fusermount3` ou `fusermount` (pacote `fuse3`, presente na maioria dos desktops). Sem eles, use o modo de extração. |
 | Bibliotecas do navegador | O Chromium embutido usa bibliotecas de desktop do sistema: NSS, GTK/ATK, GBM/DRM, X11/XCB, ALSA, CUPS, D-Bus, Pango/Cairo. Um desktop Linux comum já as tem. |
 | Claude Code | `claude` precisa estar instalado e autenticado no PATH. O AppImage não o inclui. |
 
-Distribuições que atendem a glibc 2.35, como referência: Ubuntu 22.04+, Debian 12+,
-Fedora 36+, Linux Mint 21+, Pop!_OS 22.04+, Arch/Manjaro atuais, openSUSE Tumbleweed.
+Distribuições que atendem a glibc 2.28, como referência: Ubuntu 20.04+, Debian 10+,
+RHEL/Rocky/AlmaLinux 8+, Fedora 29+, Linux Mint 20+, Pop!_OS 20.04+, Zorin 16+,
+Arch/Manjaro atuais, openSUSE Leap 15.1+ e Tumbleweed.
 
-Não suportados nesta release: Ubuntu 20.04 (glibc 2.31), Debian 11 (2.31),
-RHEL/Rocky/AlmaLinux 8 (2.28) e 9 (2.34, medido no AlmaLinux 9) e outras distribuições com glibc
-mais antiga que a 2.35, além de Alpine e outras distribuições musl, ARM, macOS e Windows.
-Para essas plataformas é preciso um build sobre uma base mais antiga ou um pacote próprio.
+Não suportados nesta release: distribuições com glibc mais antiga que a 2.28 (CentOS 7, Ubuntu 18.04),
+Alpine e outras distribuições musl, ARM, macOS e Windows. Para essas plataformas é preciso um
+build sobre uma base mais antiga ou um pacote próprio.
 
 ## Verificação feita
+
+### Fase C: base glibc 2.28 (branch `feat/appimage-glibc-228`)
+
+O build passou do Ubuntu 22.04 para a imagem `manylinux_2_28` (AlmaLinux 8) fixada por digest,
+com `gcc-toolset-14` e `dnf` no lugar de `apt`. Artefato local: 240.527.864 bytes, SHA-256
+`cf0fccd45348de6de483cb6a6b9a43ddfc890ddc636b131486cd16e725135b5c`.
+
+**glibc medida** (`glibc-max.sh`, `objdump -T` com `readelf --version-info` de conferência,
+em todos os ELFs do AppDir): **máximo GLIBC_2.28 em 78 ELFs; nenhum acima de 2.28.** Estão
+exatamente em 2.28: `libpython3.12`, `libsqlite3`, `libuuid`, o `node` do driver e `fcntl`.
+O Chromium (`chrome`) exige 2.25. Na rc6 eram 84 ELFs com máximo 2.35 (20 acima de 2.28).
+
+| Medição (host Arch, SSD, `env` limpo) | rc6 (glibc 2.35) | Fase C (glibc 2.28) |
+|---|---:|---:|
+| Tamanho do arquivo | 241.691.128 bytes | 240.527.864 bytes (−0,5 %) |
+| `--version` por FUSE (mediana de 10) | 0,15 s | 0,15 s |
+| `--version` com extract-and-run (mediana de 5) | 1,47 s | 1,48 s |
+
+`check-cases.py`: **16/16 OK**. Matriz (`matrix.sh`, 11 imagens): **Ubuntu 20.04, 22.04, 24.04,
+Debian 11 e 12, Fedora, Arch, openSUSE Tumbleweed e AlmaLinux 8 e 9 passam em tudo**, inclusive
+na coluna FUSE (+fuse3); o AlmaLinux 8 tem exatamente glibc 2.28, o piso. Só o Alpine (musl)
+falha, como esperado. A coluna FUSE (limpa) segue N-T (imagem sem `fusermount`).
+
+Regressões verificadas:
+
+- **Certificados/HTTPS:** `--py-selftest-https` no pacote faz um GET real em `https://pypi.org/simple/`
+  e devolve HTTP 200, com as CAs do host, em Ubuntu 20.04, 22.04 e 24.04, Debian 11 e 12, Fedora, Arch,
+  openSUSE Tumbleweed e AlmaLinux 8 e 9 (a imagem `debian:11` pura não traz `ca-certificates` e
+  só passou depois de instalá-lo, como em qualquer desktop). Sem o ajuste do `SSL_CERT_FILE`
+  o Python compilado na AlmaLinux 8 procuraria `/etc/pki/tls`, que não existe fora da família RHEL.
+- **ctypes/libffi, sqlite3, zlib/bz2/lzma, uuid, readline, curses:** OK nas mesmas 10 imagens.
+- **Chromium embutido:** no primeiro build da base 2.28 o PyInstaller empacotou as bibliotecas de
+  desktop da imagem (libglib 2.56, libX11, libgbm, libdbus...) e o `LD_LIBRARY_PATH` as impôs ao
+  Chromium, que caía no Ubuntu 22.04 e no Debian 12 (`undefined symbol: g_memdup2` no libpango do
+  host). Agora o Chromium fica fora da análise do PyInstaller, o pacote só leva as bibliotecas do
+  Python e `entry.py` devolve o `LD_LIBRARY_PATH` original aos filhos. Verificado no Ubuntu 22.04
+  com as bibliotecas de desktop instaladas: `doctor` abre o Chromium embutido por CDP com
+  `LD_LIBRARY_PATH` vazio. Em Ubuntu 24.04 e Debian 12 só foi testado o `chrome` direto, sem o `LD_LIBRARY_PATH`
+  do PyInstaller.
+
+Ressalvas: o Python embutido passa a usar OpenSSL 1.1.1k (AlmaLinux 8, corrigido pela Red Hat, mas fora do
+suporte upstream); o app só usa HTTP local (CDP). O bootloader do PyInstaller continua o do wheel
+(2.14, dentro do gate), sem recompilar do sdist. Zorin e máquinas físicas não foram testados.
 
 ### Fase B: runtime estático (branch `feat/appimage-runtime-estatico`)
 

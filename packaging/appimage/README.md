@@ -1,21 +1,30 @@
-# AppImage CLI x86_64 — fase 1
+# AppImage CLI x86_64 — fase 1 (base glibc 2.28)
 
 No host com Docker: `packaging/appimage/build.sh`.
-Dentro de ubuntu:22.04, como root: `bash packaging/appimage/container-build.sh`.
+Dentro de `quay.io/pypa/manylinux_2_28_x86_64` (AlmaLinux 8, glibc 2.28), como root:
+`bash packaging/appimage/container-build.sh`. A imagem é fixada por digest em `build.sh` e em
+`.github/workflows/appimage.yml`: `sha256:d086f64cddcace250ef0f0073583c51b8298159303290a730c9f59bd91edfd2c`
+(criada em 2026-11-14).
 `OUT_DIR` tem padrão `dist/appimage`. No host deve ser relativo à raiz do
 repositório; dentro do container também aceita caminho absoluto. A última linha
 contém o caminho do artefato. O wrapper monta o código somente para leitura e
-apenas a pasta de saída para escrita. O container instala os pacotes de build
-pelos repositórios autenticados da distribuição, compila Python 3.12.8 e congela
+apenas a pasta de saída para escrita. O container instala os pacotes `-devel`
+com `dnf` (repositórios AlmaLinux 8, assinatura GPG conferida), compila Python 3.12.8 e congela
 o entry point `dracaena.cli:main`, sem alterar a aplicação.
 
 Python e appimagetool têm SHA-256 fixado; PyInstaller e suas dependências têm
 versão e SHA-256 fixados em `requirements-build.txt`, inclusive transitivas.
 O pip exige hashes e aceita somente wheels. O runtime estático type2 `20251108` também tem
 hash fixo (ver "Runtime estático"), o que impede o download implícito de um runtime variável
-pelo appimagetool. Fontes: python.org, pypi.org e releases oficiais AppImage. Os pacotes do sistema e a imagem
-ubuntu:22.04 recebem atualizações; o `apt-get` não é fixado por versão ou snapshot.
-Este build não promete identidade bit a bit.
+pelo appimagetool. Fontes: python.org, pypi.org e releases oficiais AppImage. Este build não promete identidade bit a bit.
+
+O que deixa de ser "pacote autenticado da distribuição": a base de build não é mais a imagem
+oficial do Ubuntu, e sim a `manylinux_2_28` da PyPA, de terceiros, confiada pelo digest (um digest
+novo exige revisão). Dela vêm o compilador (`gcc-toolset-14`), `zlib-devel`, `file`, `unzip` e `curl`,
+sem verificação de assinatura na hora do build. Só os pacotes que o `dnf` instala no build
+(`openssl-devel`, `libffi-devel`, `sqlite-devel` etc.) são autenticados pelo repositório AlmaLinux,
+sem fixar versão. O Python embutido usa o OpenSSL 1.1.1k da AlmaLinux 8 (corrigido pela Red Hat,
+mas fora do suporte upstream), no lugar do OpenSSL 3 do Ubuntu 22.04.
 
 `AppRun` usa como raiz o `$APPDIR` exportado pelo runtime (ponto de montagem
 ou diretório extraído), o que cobre a invocação do AppImage por link simbólico;
@@ -37,7 +46,10 @@ mais o compressor. O Chromium
 reserva (Chrome for Testing 156.0.8078.4, revisão 1248, SHA-256 fixado) é embutido
 somente leitura em `_internal/dracaena-browsers`. `entry.py` aponta o fallback do
 Playwright para essa cópia, no lugar do download para a pasta de dados do usuário.
-O Chromium ainda usa as bibliotecas de desktop do sistema (NSS, GTK/ATK, GBM, X11, ALSA).
+O Chromium é copiado para o AppDir depois do congelamento, fora da análise do PyInstaller, que
+empacotaria as bibliotecas de desktop da imagem de build (glib, X11, gbm) e as imporia ao
+navegador. Ele usa as bibliotecas de desktop do sistema (NSS, GTK/ATK, GBM, X11, ALSA), e
+`entry.py` devolve aos processos filhos o `LD_LIBRARY_PATH` original.
 Não entram Qt ou bandeja. `doctor` pode retornar 1 por dependências externas
 ausentes. Recursos JSON/TXT do pacote entram como dados. O projeto não é
 instalado via pip: o build seleciona suas dependências explicitamente.
@@ -60,9 +72,11 @@ está disponível e o daemon real está incluído (modo simulação por padrão,
 
 ## Requisitos e resíduos
 
-- **glibc 2.35 ou mais nova** (Linux x86_64). O build roda em ubuntu:22.04 e o maior
-  símbolo exigido pelos binários do pacote é `GLIBC_2.35` (medido com `objdump -T`).
-  Distribuições com glibc mais velha não são suportadas.
+- **glibc 2.28 ou mais nova** (Linux x86_64). O build roda em AlmaLinux 8 (glibc 2.28) e o
+  maior símbolo exigido por qualquer ELF do pacote é `GLIBC_2.28` (`glibc-max.sh`, `objdump -T`).
+  O build falha se um ELF passar disso, e `glibc-max.txt` lista todos. O piso de 2.28 vem do
+  Node do driver do Playwright e do `libpython`. Distribuições com glibc mais velha (por exemplo
+  CentOS 7, Ubuntu 18.04) e musl (Alpine) não são suportadas.
 - **FUSE:** o runtime é estático e não liga `libfuse.so.2`. O modo FUSE precisa só de
   `/dev/fuse` e de `fusermount3` ou `fusermount` (pacote `fuse3`, já presente na maioria dos
   desktops). Em Ubuntu 22.04+ o modo FUSE dispensa `libfuse2` (medido em contêiner; o Zorin 17/18, base Ubuntu, não foi testado).
@@ -71,6 +85,16 @@ está disponível e o daemon real está incluído (modo simulação por padrão,
 - **python-xlib** (atalho global X11) fica fora do AppImage da fase 1. Ele vem de
   `requirements.txt` só para a UI. O build usa `requirements-build.txt`, que não o lista,
   e o pacote não tem arquivos `xlib`.
+
+## Python embutido e certificados
+
+`entry.py --py-selftest` (e `--py-selftest-https`, com rede) exercita o Python congelado:
+ctypes/libffi (callback via `qsort`), ssl (CAs carregadas), sqlite3, zlib/bz2/lzma, uuid.
+O Python é compilado com `OPENSSLDIR=/etc/pki/tls` (AlmaLinux 8); fora da família RHEL esse
+caminho não existe, então `entry.py` aponta `SSL_CERT_FILE` para o primeiro pacote de CAs legível
+entre `/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt`,
+`/etc/ssl/ca-bundle.pem`, `/etc/pki/tls/cert.pem` e `/etc/ssl/cert.pem`. `SSL_CERT_FILE` e
+`SSL_CERT_DIR` definidos pelo usuário têm prioridade.
 
 ## Verificação dos 16 casos
 
