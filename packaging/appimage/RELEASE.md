@@ -63,6 +63,11 @@ Resultados da rc3 (tag `v0.1.0-rc3`, commit `e553cc8`, run 44076261704 do workfl
 `AppImage`). Artefato `dracaena-x86_64.AppImage`, 255.882.432 bytes,
 SHA-256 `b4e4cc9aacec0e19fb36084212a268d7b8341528838542a12b80261762f27d3f`.
 
+Na rc4 (tag `v0.1.0-rc4`, commit `1fa121e`, run 44078391109) o workflow inteiro ficou
+verde. Ela só muda o CI e a matriz, que agora separa as distribuições não suportadas
+(falha esperada) das regressões. O código empacotado é o mesmo da rc3. Como o build
+não é reprodutível bit a bit, o artefato da rc4 tem outro SHA-256.
+
 O job `appimage` passou em `verify.sh` (resultado `OK`): `--version`, `--help`, `doctor`
 e `daemon` com socket e `status` respondendo, em contêiner sem Python do sistema. O job
 `compatibilidade` roda `packaging/appimage/matrix.sh` em 11 imagens limpas, sem instalar
