@@ -29,7 +29,7 @@ from urllib.request import urlopen
 
 from ..adapters.base import Registry
 from ..guard import Guard, Refused, ResultScreen
-from ..platform.browser import BrowserSandboxUnavailable
+from ..platform.browser import BrowserError, BrowserSandboxUnavailable
 from ..platform.paths import data_dir
 from . import claude, contract
 from .errors import AdapterError, NotFound, ServiceError
@@ -58,13 +58,17 @@ class Step:
     reason: str = ""
 
 
+BROWSER_HINT = ("Se o navegador padrão não for Chromium, rode 'dracaena install-browser' para baixar o Chromium "
+                "reserva ou informe o caminho de um Chromium em BROWSER_BIN.")
+
+
 def default_endpoint() -> int:
     """Porta CDP do perfil dedicado; sem ele aberto, ``no_browser``."""
-    from ..platform.browser import BrowserError, read_port
+    from ..platform.browser import read_port
     try:
         return read_port(data_dir() / "browser-profile")
     except (OSError, BrowserError) as exc:
-        raise ServiceError("no_browser", "Nenhum navegador dedicado aberto; abra o navegador do Dracaena.") from exc
+        raise ServiceError("no_browser", f"Nenhum navegador dedicado aberto; abra o navegador do Dracaena. {BROWSER_HINT}") from exc
 
 
 def default_tabs(port: int) -> list[dict]:
@@ -347,6 +351,8 @@ class Service:
                     browser.close()
         except BrowserSandboxUnavailable as exc:
             self._fail(gen, str(exc), exc.condition)
+        except BrowserError as exc:
+            self._fail(gen, f"{exc} {BROWSER_HINT}")
         except ServiceError as exc:
             self._fail(gen, exc.msg)
         except AdapterError as exc:
