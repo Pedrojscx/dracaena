@@ -1,16 +1,14 @@
 from pathlib import Path
-import os
 import sys
 from PyInstaller.utils.hooks import collect_data_files
 
 root = Path(SPECPATH).parents[1]
 sys.path.insert(0, str(root / "lib"))
-browser_dir = Path(os.environ["DRACAENA_BUNDLED_BROWSERS"])
-if not browser_dir.is_dir():
-    raise SystemExit(f"Chromium incorporado ausente: {browser_dir}")
+# O Chromium NÃO entra aqui: o PyInstaller analisaria os ELFs dele e empacotaria as
+# bibliotecas de desktop da imagem de build (glib, X11, gbm...). container-build.sh copia
+# o navegador para _internal/dracaena-browsers depois do congelamento.
 datas = (collect_data_files("dracaena", includes=["**/*.json", "**/*.txt", "**/*.js"])
-         + collect_data_files("playwright")
-         + [(str(browser_dir), "dracaena-browsers")])
+         + collect_data_files("playwright"))
 a = Analysis(
     [str(Path(SPECPATH) / "entry.py")],
     pathex=[str(root / "lib")],

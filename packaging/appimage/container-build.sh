@@ -66,8 +66,11 @@ chmod +x "$WORK/appimagetool"
 mkdir "$WORK/tool"
 (cd "$WORK/tool" && "$WORK/appimagetool" --appimage-extract >/dev/null)
 cd "$ROOT"
-DRACAENA_BUNDLED_BROWSERS="$BROWSERS" "$PY" -m PyInstaller --noconfirm --clean --distpath "$WORK/dist" \
+"$PY" -m PyInstaller --noconfirm --clean --distpath "$WORK/dist" \
   --workpath "$WORK/freeze" packaging/appimage/dracaena.spec >&2
+# Chromium fora da análise do PyInstaller (ver dracaena.spec); entry.py usa esta pasta.
+mkdir -p "$WORK/dist/dracaena/_internal/dracaena-browsers"
+cp -a "$BROWSERS/." "$WORK/dist/dracaena/_internal/dracaena-browsers/"
 APPDIR="$WORK/Dracaena.AppDir"
 mkdir -p "$APPDIR/usr/bin" "$OUT_DIR"
 cp -a "$WORK/dist/dracaena/." "$APPDIR/usr/bin/"
