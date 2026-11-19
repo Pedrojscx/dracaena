@@ -400,6 +400,17 @@ if (cd "$WORK" && env -i PATH=/nonexistent "$APP" --appimage-extract >/dev/null 
             | xargs -0 -r objdump -T 2>/dev/null | grep -Eo 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -n1 || true)"
         echo "maior versão GLIBC exigida pelos ELF embutidos: ${GLIBC:-(nenhuma)}"
     fi
+    PROMPTS_ROOT="$ROOT/usr/bin/_internal/prompts"
+    PROMPTS=(system.txt answer.txt invalid.txt retry.txt)
+    missing_prompts=()
+    for prompt in "${PROMPTS[@]}"; do
+        [[ -f "$PROMPTS_ROOT/$prompt" ]] || missing_prompts+=("$prompt")
+    done
+    if [[ "${#missing_prompts[@]}" == 0 ]]; then
+        record OK "prompts empacotados" "4 arquivos em usr/bin/_internal/prompts"
+    else
+        record FALHOU "prompts empacotados" "ausentes em usr/bin/_internal/prompts: ${missing_prompts[*]}"
+    fi
     record INFO "conteúdo" "$(numfmt --to=iec-i --suffix=B "$TOTAL") extraído; ${#SOS[@]} .so"
 else
     echo "falha ao extrair:"

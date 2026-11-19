@@ -2,9 +2,9 @@
 
 Formato: {ok, checks: [{name, ok, message?, hint?}]}, com textos em português.
 """
-import importlib.util
 import os
 import shutil
+from ..core import claude
 from . import browser, config
 from .paths import config_dir, data_dir, runtime_dir
 
@@ -12,17 +12,10 @@ PROMPTS = ("system.txt", "answer.txt", "invalid.txt", "retry.txt")
 
 
 def _prompts_check():
-    """Os prompts pertencem ao núcleo; a checagem só existe quando o pacote está presente."""
-    try:
-        present = importlib.util.find_spec("dracaena.core.prompts") is not None
-    except (ImportError, ValueError):
-        present = False
-    if not present:
-        return None
-    from importlib.resources import files
-    missing = [name for name in PROMPTS if not files("dracaena.core.prompts").joinpath(name).is_file()]
+    """Confere os mesmos arquivos que ``dracaena.core.claude`` realmente lê."""
+    missing = [name for name in PROMPTS if not (claude.PROMPTS / name).is_file()]
     if missing:
-        return False, "Prompts ausentes: " + ", ".join(missing), "Reinstale o Dracaena."
+        return False, "Prompts ausentes: " + ", ".join(missing), f"Verifique {claude.PROMPTS}."
     return True, "Prompts do núcleo legíveis.", None
 
 

@@ -153,6 +153,7 @@ class Listener:
         self.socket = None
         self.pipe = None
         self.closed = False
+        self._close_lock = threading.Lock()  # close() vem de threads concorrentes (serve() e o chamador)
         if os.name == "nt":
             self.pipe = self._create_pipe(first=True)
             return
@@ -176,8 +177,11 @@ class Listener:
             raise
 
     def accept(self):
-        if self.socket:
-            conn, _ = self.socket.accept()
+        if self.socket or self.closed:
+            sock = self.socket  # referência local: close() em outra thread zera o atributo
+            if sock is None:
+                raise OSError("Servidor IPC encerrado")
+            conn, _ = sock.accept()
             return Connection(conn)
         import win32pipe
         handle = self.pipe
@@ -223,18 +227,19 @@ class Listener:
             raise
 
     def close(self):
-        self.closed = True
-        if self.pipe:
-            self.pipe.Close()
-            self.pipe = None
-        if self.socket:
-            try:
-                self.socket.shutdown(socket.SHUT_RDWR)  # acorda um accept() bloqueado em outra thread
-            except OSError:
-                pass
-            self.socket.close()
-            self.socket = None
-            Path(self.address).unlink(missing_ok=True)
+        with self._close_lock:  # idempotente e seguro entre threads
+            self.closed = True
+            if self.pipe:
+                self.pipe.Close()
+                self.pipe = None
+            if self.socket:
+                try:
+                    self.socket.shutdown(socket.SHUT_RDWR)  # acorda um accept() bloqueado em outra thread
+                except OSError:
+                    pass
+                self.socket.close()
+                self.socket = None
+                Path(self.address).unlink(missing_ok=True)
 
 
 def connect(timeout=5):

@@ -8,7 +8,9 @@ sys.path.insert(0, str(root / "lib"))
 # bibliotecas de desktop da imagem de build (glib, X11, gbm...). container-build.sh copia
 # o navegador para _internal/dracaena-browsers depois do congelamento.
 datas = (collect_data_files("dracaena", includes=["**/*.json", "**/*.txt", "**/*.js"])
-         + collect_data_files("playwright"))
+         + collect_data_files("playwright")
+         + [(str(root / "prompts" / name), "prompts")
+            for name in ("system.txt", "answer.txt", "invalid.txt", "retry.txt")])
 a = Analysis(
     [str(Path(SPECPATH) / "entry.py")],
     pathex=[str(root / "lib")],

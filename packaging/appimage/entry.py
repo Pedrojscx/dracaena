@@ -129,9 +129,19 @@ def _use_bundled_browser():
         browser.fallback_dir = lambda: root
 
 
+def _use_bundled_prompts():
+    """Aponta o núcleo para os prompts coletados no bundle congelado."""
+    if not getattr(sys, "frozen", False):
+        return
+    prompts = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / "prompts"
+    if prompts.is_dir():
+        os.environ["DRACAENA_PROMPTS"] = str(prompts)
+
+
 _restore_library_path()
 _use_host_certificates()
 _use_bundled_browser()
+_use_bundled_prompts()
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 from dracaena.cli import main
 

@@ -46,6 +46,20 @@ class PlatformTests(unittest.TestCase):
         names = {entry.name for entry in (Path(config.__file__).parent / "resources").iterdir()}
         self.assertFalse({"answer.txt", "invalid.txt", "retry.txt", "system.txt"} & names)
 
+    def test_doctor_checks_prompts_used_by_claude(self):
+        from dracaena.core import claude
+        from dracaena.platform import doctor
+        with tempfile.TemporaryDirectory() as directory:
+            prompts = Path(directory)
+            for name in doctor.PROMPTS:
+                (prompts / name).write_text("synthetic", encoding="utf-8")
+            with patch.object(claude, "PROMPTS", prompts):
+                self.assertEqual(doctor._prompts_check(), (True, "Prompts do núcleo legíveis.", None))
+                (prompts / "answer.txt").unlink()
+                result = doctor._prompts_check()
+        self.assertFalse(result[0])
+        self.assertIn("answer.txt", result[1])
+
     def test_user_messages_are_portuguese(self):
         with self.assertRaisesRegex(ValueError, "Chave desconhecida"):
             config.validate("NOPE", 1)

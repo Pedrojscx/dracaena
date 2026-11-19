@@ -145,6 +145,45 @@ class RealSocketTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertFalse(os.path.exists(listener.address))
 
+    def test_listener_close_is_idempotent(self):
+        import os
+        from dracaena.platform import ipc
+        listener = ipc.Listener()
+        listener.close()
+        listener.close()
+        self.assertTrue(listener.closed)
+        self.assertFalse(os.path.exists(listener.address))
+
+    def test_listener_concurrent_close_does_not_raise(self):
+        import os
+        from dracaena.platform import ipc
+        for _ in range(50):
+            listener = ipc.Listener()
+            barrier = threading.Barrier(2)
+            errors = []
+
+            def closer():
+                barrier.wait()
+                try:
+                    listener.close()
+                except BaseException as exc:  # noqa: BLE001 - o teste coleta qualquer falha
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=closer) for _ in range(2)]
+            for item in threads:
+                item.start()
+            for item in threads:
+                item.join(3)
+            self.assertEqual(errors, [])
+            self.assertFalse(os.path.exists(listener.address))
+
+    def test_listener_accept_after_close_raises_oserror(self):
+        from dracaena.platform import ipc
+        listener = ipc.Listener()
+        listener.close()
+        with self.assertRaisesRegex(OSError, "encerrado"):
+            listener.accept()
+
     def test_request_without_reply_is_an_error(self):
         from dracaena.platform import ipc
         listener = ipc.Listener()

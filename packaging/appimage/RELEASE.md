@@ -33,15 +33,50 @@ chmod +x dracaena-x86_64.AppImage
 ./dracaena-x86_64.AppImage doctor
 ```
 
-Sem FUSE (contêineres, WSL, algumas distribuições mínimas) o AppImage também roda por extração.
-Ela grava cerca de 600 MB em `TMPDIR` e **não os apaga ao sair** (o runtime novo não faz a limpeza);
-o diretório `appimage_extracted_<hash>` é reaproveitado nas execuções seguintes e pode ser removido à mão:
+Sem FUSE (contêineres, WSL, algumas distribuições mínimas) o AppImage também roda por extração:
 
 ```bash
 APPIMAGE_EXTRACT_AND_RUN=1 ./dracaena-x86_64.AppImage --version
 # ou
 ./dracaena-x86_64.AppImage --appimage-extract-and-run --version
 ```
+
+**Resíduo da extração.** O AppImage extrai o pacote (cerca de 600 MB) em
+`$TMPDIR/appimage_extracted_<md5 do arquivo>` (padrão `/tmp`) e **não o apaga ao sair**. As execuções seguintes
+reaproveitam o diretório (0,6 s em vez de 2,4 s no `--version`), e cada versão nova do AppImage deixa outro
+diretório. Em muitos sistemas `/tmp` fica na memória: se faltar RAM, aponte `TMPDIR` para um disco
+(`TMPDIR=$HOME/.cache/dracaena APPIMAGE_EXTRACT_AND_RUN=1 ./dracaena-x86_64.AppImage ...`). Para liberar o espaço,
+com o Dracaena fechado (`dracaena stop`), na pasta do arquivo:
+
+```bash
+rm -rf "${TMPDIR:-/tmp}/appimage_extracted_$(md5sum dracaena-x86_64.AppImage | cut -d' ' -f1)"
+rmdir "${TMPDIR:-/tmp}"/.mount_dracae* 2>/dev/null
+```
+
+O primeiro comando apaga só o diretório desta versão, sem tocar em outros AppImages. O segundo remove apenas
+diretórios **vazios**, então não mexe num ponto de montagem em uso. Com FUSE sobra só um diretório vazio
+`.mount_dracae*`, que não se acumula.
+
+## Como usar
+Com uma atividade de **prática** carregada em uma aba do navegador que o Dracaena controla (por CDP):
+
+```bash
+./dracaena-x86_64.AppImage daemon      # inicia o servidor local (modo simulação: não clica na página)
+./dracaena-x86_64.AppImage ask         # consulta só a questão atual e mostra a resposta, sem clicar
+./dracaena-x86_64.AppImage once        # processa uma única questão e para
+./dracaena-x86_64.AppImage status      # mostra o estado atual do daemon
+```
+
+**Só abas `http://` ou `https://` são lidas.** Páginas abertas como arquivo local (`file://`) são ignoradas, e o
+Dracaena responde `Nenhuma questão visível nas abas abertas.` Para testar com um HTML local, sirva a pasta por um
+servidor local e abra o endereço `http://`:
+
+```bash
+python3 -m http.server 8765 --bind 127.0.0.1 --directory <pasta-do-html>
+# abra http://127.0.0.1:8765/<arquivo>.html no navegador do Dracaena
+```
+
+Essa mesma mensagem aparece quando a aba está em `http(s)` mas nenhuma questão é reconhecida na página.
 
 ## Compatibilidade
 
@@ -63,6 +98,63 @@ Alpine e outras distribuições musl, ARM, macOS e Windows. Para essas plataform
 build sobre uma base mais antiga ou um pacote próprio.
 
 ## Verificação feita
+
+### Resultados da rc7 (valem para esta release)
+Tag `v0.1.0-rc7`, commit `4740971`, run 44107651864 do workflow `AppImage`, todos os jobs verdes.
+Artefato `dracaena-x86_64.AppImage`: 240.523.768 bytes,
+SHA-256 `a820798a7d4d20d33e04e761e6d209556c4d89ed9acbe53e9317482432c26b1f`.
+O build não é reprodutível bit a bit, então outro build do mesmo commit terá outro SHA-256.
+
+- **glibc:** máximo `GLIBC_2.28` em 78 ELFs (`glibc-max.txt` do artefato); o build falha se algum exigir mais.
+- **`verify.sh`:** resultado `OK` (`--version`, `--help`, `doctor` e daemon com socket e `status`, em contêiner sem Python do sistema).
+- **`--version`:** `dracaena 0.1.0` no artefato baixado.
+- **Matriz** (`matrix.sh`, 11 imagens limpas, sem instalar pacotes): as 10 imagens glibc passam em tudo,
+  inclusive na coluna **FUSE (+fuse3)**, que instala só `fuse3` na imagem (sem `libfuse2`). A coluna
+  **FUSE (limpa)** é N-T porque a imagem limpa não tem `fusermount` (`No suitable fusermount binary found on the $PATH`).
+  Só o Alpine (musl) falha, como esperado, e o job fica verde nele. A coluna `navegador` confere, sem
+  `BROWSER_BIN`, Firefox padrão, Chromium padrão e nenhum navegador (Firefox e nenhum usam o Chromium embutido).
+
+| Distro | glibc | `--version` | `--help` | `doctor` | daemon + IPC | navegador | extract-and-run | FUSE (limpa) | FUSE (+fuse3) | Resultado |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| Ubuntu 20.04 | 2.31 | OK | OK | OK | OK | OK | OK | N-T | OK | OK; FUSE (limpa) não testada: a imagem não tem `fusermount` |
+| Ubuntu 22.04 | 2.35 | OK | OK | OK | OK | OK | OK | N-T | OK | OK; FUSE (limpa) não testada: a imagem não tem `fusermount` |
+| Ubuntu 24.04 | 2.39 | OK | OK | OK | OK | OK | OK | N-T | OK | OK; FUSE (limpa) não testada: a imagem não tem `fusermount` |
+| Debian 11 | 2.31 | OK | OK | OK | OK | OK | OK | N-T | OK | OK; FUSE (limpa) não testada: a imagem não tem `fusermount` |
+| Debian 12 | 2.36 | OK | OK | OK | OK | OK | OK | N-T | OK | OK; FUSE (limpa) não testada: a imagem não tem `fusermount` |
+| Fedora latest | 2.44 | OK | OK | OK | OK | OK | OK | N-T | OK | OK; FUSE (limpa) não testada: a imagem não tem `fusermount` |
+| Arch Linux latest | 2.44 | OK | OK | OK | OK | OK | OK | N-T | OK | OK; FUSE (limpa) não testada: a imagem não tem `fusermount` |
+| openSUSE Tumbleweed | 2.44 | OK | OK | OK | OK | OK | OK | N-T | OK | OK; FUSE (limpa) não testada: a imagem não tem `fusermount` |
+| AlmaLinux 8 | 2.28 | OK | OK | OK | OK | OK | OK | N-T | OK | OK; FUSE (limpa) não testada: a imagem não tem `fusermount` |
+| AlmaLinux 9 | 2.34 | OK | OK | OK | OK | OK | OK | N-T | OK | OK; FUSE (limpa) não testada: a imagem não tem `fusermount` |
+| Alpine latest (não suportado) | musl 1.2.6 | FALHA | FALHA | FALHA | FALHA | FALHA | OK | N-T | FALHA | falha esperada: executável glibc não carrega em musl |
+
+A matriz roda em contêineres Docker sobre o kernel do runner. Isso não substitui um teste em máquina real, e o
+navegador foi verificado pela escolha do executável (`doctor` e `install-browser`), não por uma sessão de navegação.
+
+### Teste em desktop real (Arch Linux, rc7)
+Teste em máquina física com sessão gráfica, sobre o artefato da rc7 (mesmo SHA-256 acima), com glibc 2.44.
+A sessão era Wayland, mas o Chromium foi forçado a X11 (`--ozone-platform=x11`) para obter uma janela funcional.
+Configuração, dados, perfil e runtime ficaram em diretórios temporários; `BROWSER_BIN` vazio e a descoberta de
+navegadores do sistema neutralizada.
+
+- `--version` mostrou `dracaena 0.1.0`, e o `doctor` escolheu o **Chromium embutido**.
+- O Chromium abriu uma página local de teste em janela visível, com o perfil dedicado do Dracaena.
+- O CDP respondeu **somente em `127.0.0.1`** (porta efêmera); o `webSocketDebuggerUrl` também apontou para `127.0.0.1`.
+- Os processos do Chromium **não receberam `--no-sandbox`**, e o teste não precisou de `DRACAENA_CHROMIUM_NO_SANDBOX`.
+- O `daemon` iniciou em `DRY_RUN=true`, e `dracaena ask` chegou ao daemon.
+- **Leitura da questão, verificada:** com a página de teste (`radio_rotulos.html`, grupo de rádio com rótulos externos)
+  servida por HTTP em `127.0.0.1:8765` e aberta como `http://127.0.0.1:8765/radio_rotulos.html` no Chromium embutido,
+  `ask` e `once` chegaram ao laço, o daemon registrou `aba escolhida (heuristic)` e `tipo da questão: SINGLE`.
+- `stop` e SIGTERM encerraram daemon, Chromium e servidor local, sem processos nem socket residuais.
+- **Falha encontrada na rc7 (corrigida depois dela):** depois de escolher a aba, `ask` e `once` pararam com
+  `FileNotFoundError` para `prompts/answer.txt`: os textos de `prompts/` não estavam no pacote, e o `doctor` não
+  detectava a ausência. A correção está em "Mudanças desde a rc7" (Task-021, #114).
+- Uma primeira execução, com a página aberta de outro modo, terminou com `Nenhuma questão visível nas abas abertas.`
+  (ver "Como usar": só abas `http://` e `https://` são lidas).
+
+### Histórico das fases anteriores
+As seções abaixo registram como o pacote chegou aqui. Os números de rc3 e rc4 (glibc 2.35, runtime AppImageKit 13)
+estão superados pela tabela da rc7.
 
 ### Fase C: base glibc 2.28 (branch `feat/appimage-glibc-228`)
 
@@ -128,8 +220,8 @@ O que o runtime ainda exige do host: `/dev/fuse` e `fusermount3` ou `fusermount`
 Matriz (`matrix.sh`, 11 imagens): as 6 suportadas (Ubuntu 22.04 e 24.04, Debian 12, Fedora,
 Arch, openSUSE Tumbleweed) passam em tudo, inclusive na nova coluna **FUSE (+fuse3)**, que
 instala só `fuse3` na imagem (sem `libfuse2`) e roda o AppImage por FUSE. A coluna **FUSE
-(limpa)** continua N-T nelas, porque a imagem limpa não tem `fusermount`. As cinco não suportadas
-falham como esperado (glibc < 2.35 ou musl). Não testado: Zorin 17/18 reais e máquinas físicas.
+(limpa)** continua N-T nelas, porque a imagem limpa não tem `fusermount`. As cinco não suportadas (nessa fase,
+base glibc 2.35: glibc < 2.35 ou musl) falhavam como esperado; a fase C abaixou o piso para 2.28. Não testado: Zorin 17/18 reais e máquinas físicas.
 
 #### Resultados da fase anterior (rc3/rc4, runtime AppImageKit 13)
 Resultados da rc3 (tag `v0.1.0-rc3`, commit `e553cc8`, run 44076261704 do workflow
@@ -204,24 +296,58 @@ registra um aviso no log. Vale só para o Chromium embutido: um navegador do sis
 o informado em `BROWSER_BIN` nunca recebe `--no-sandbox`. Sem esse sandbox, uma página
 maliciosa tem menos barreiras contra o sistema; use só em máquinas e sites de confiança.
 
-Ainda não verificado: sessão real de navegador com o Chromium embutido em outras
-distribuições, o daemon real respondendo a uma atividade de verdade e execução em
-glibc exatamente 2.35 fora do contêiner de build. Também falta confirmar o
-comportamento do sandbox em um Ubuntu 24.04 real, com a restrição de AppArmor ativa.
+Ainda não verificado:
+- Ubuntu 24.04 desktop com a restrição de AppArmor a user namespaces ativa (o comportamento do sandbox do
+  Chromium embutido ali).
+- Firefox como navegador padrão em uma instalação real (a matriz só simula o padrão com stubs).
+- Uma sessão Wayland sem forçar X11.
+- O clique de verdade: a simulação (`DRY_RUN=true`) foi verificada até `(dry-run) faria: ...`, mas o clique real,
+  com o `DRY_RUN` desligado, não foi testado. A confirmação da correção dos prompts **sobre o artefato da tag da
+  rc8** vem do `verify.sh` do CI (item `prompts empacotados`); até lá ela só foi verificada em build local.
+- Zorin e outras máquinas físicas além do Arch testado. A matriz roda em contêineres: o glibc 2.28 foi medido
+  no AlmaLinux 8, que tem exatamente esse piso.
 Os testes da branch servem para isso.
+
+## Mudanças desde a rc7
+- **Prompts no pacote (Task-021, #114).** Na rc7 o AppImage não trazia `prompts/*.txt`, e `ask` e `once` paravam com
+  `FileNotFoundError`. Agora o `dracaena.spec` empacota os quatro arquivos (`system.txt`, `answer.txt`, `invalid.txt`,
+  `retry.txt`) em `_internal/prompts`, e o `entry.py` aponta `DRACAENA_PROMPTS` para essa pasta no executável
+  congelado. O `doctor` passou a conferir o mesmo caminho que o núcleo lê (antes procurava um pacote que não existe e
+  nunca acusava a falta), e o `verify.sh` ganhou o item `prompts empacotados`, que falha se faltar algum.
+  **Verificado em build local** (240.527.864 bytes, SHA-256 `9e21e37d3e78e1af7854efeed36ae591cf98d9092acc5e9b83bde733933dcd35`,
+  não é o artefato da rc8): suíte com 388 testes OK, `verify.sh` com `RESULTADO: OK` e 15 itens (o mesmo `verify.sh`
+  sobre o AppImage da rc7 falha em `prompts empacotados`), `doctor` com `prompts: OK`, e `once` com `DRY_RUN=true` e
+  a página de teste servida por HTTP chegando a `(dry-run) faria: [0] ...` sem `FileNotFoundError`.
+- **Encerramento do IPC (Task-018, #91).** Corrida em `Listener.close()`: a thread do teste e o `finally` de
+  `Daemon.serve()` chamavam `close()` ao mesmo tempo, e a segunda encontrava o socket já `None`. Agora `close()` roda sob
+  um `threading.Lock` (idempotente) e `accept()` usa uma referência local do socket e levanta `OSError` se o servidor já
+  fechou. Medido: 0 falhas em 300 repetições do teste sob carga (antes, 36 em 300) e 5 rodadas completas da suíte, todas OK.
+
+## Decisões da 0.1.0: OpenSSL e resíduo de extração
+- **OpenSSL.** O Python embutido usa OpenSSL 1.1.1k, da AlmaLinux 8 (corrigido pela Red Hat, mas fora do suporte
+  upstream). O Dracaena só faz HTTP local (CDP, `127.0.0.1`) pelo Python; o Chromium usa BoringSSL próprio e o
+  driver do Playwright traz o OpenSSL dele. Por isso a versão não afeta o uso normal, e **a release mantém a 1.1.1k**.
+  Medido na rc7: as bibliotecas da 1.1.1k somam cerca de 4,6 MB dos 604 MiB descomprimidos. Compilar OpenSSL 3 no
+  build é viável (cerca de 70 s a mais e cerca de 11 MB a mais), mas exigiria reverificar tudo. **Gatilho de revisão:** se um
+  recurso futuro (atualização automática, telemetria, download) usar HTTPS pelo Python, o build deve migrar para
+  OpenSSL 3 antes de ele entrar.
+- **Resíduo em `TMPDIR`.** Fica só **documentado** (seção "Instalação"), sem limpeza automática. O `AppRun` termina
+  com `exec`, e limpar ao sair o transformaria em processo pai (muda PID e sinais do daemon de longa duração). O
+  diretório extraído também é reaproveitado entre execuções, e apagá-lo ao sair de uma instância poderia afetar outra.
 
 ## Build e CI
 
 - Local, com Docker: `packaging/appimage/build.sh` (saída em `dist/appimage/`).
 - GitHub Actions: o workflow `.github/workflows/appimage.yml` roda em tag `v*` ou
-  por disparo manual (`workflow_dispatch`). Ele faz o build no contêiner `ubuntu:22.04`
-  fixado por digest, roda `verify.sh` sem o Python do sistema e publica o AppImage
-  como artefato do workflow por 14 dias.
+  por disparo manual (`workflow_dispatch`). Ele faz o build no contêiner
+  `quay.io/pypa/manylinux_2_28_x86_64` (AlmaLinux 8, glibc 2.28) fixado por digest, roda
+  `verify.sh` num contêiner `ubuntu:22.04` sem o Python do sistema e publica o AppImage
+  como artefato do workflow por 14 dias. O workflow não roda em `pull_request`.
 - Job `compatibilidade`: roda `packaging/appimage/matrix.sh` em 11 imagens limpas (Ubuntu
   20.04/22.04/24.04, Debian 11/12, Fedora, Arch, openSUSE Tumbleweed, AlmaLinux 8/9 e
-  Alpine), sem instalar pacotes, e publica uma linha da matriz por imagem. As imagens com
-  glibc anterior à 2.35 e o Alpine (musl) são marcadas como "não suportado, falha esperada":
-  a falha não reprova o job, que só fica vermelho se uma imagem suportada regredir.
+  Alpine), sem instalar pacotes, e publica uma linha da matriz por imagem. O Alpine
+  (musl) é marcado como "não suportado, falha esperada": a falha não reprova o job, que só fica
+  vermelho se uma imagem suportada regredir.
 
 Detalhes técnicos do empacotamento estão em [`README.md`](README.md).
 

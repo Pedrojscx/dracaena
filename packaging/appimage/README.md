@@ -70,6 +70,14 @@ apaga o `TMPDIR` de cada caso para não encher o `/tmp`. Na branch
 está disponível e o daemon real está incluído (modo simulação por padrão, via
 `DRY_RUN`). Notas da release: [`RELEASE.md`](RELEASE.md).
 
+## Quais páginas o Dracaena lê
+O serviço só considera abas `http://` ou `https://` (`_web`, em `lib/dracaena/core/service.py`). Uma página aberta
+como `file://` é ignorada e o comando termina com `Nenhuma questão visível nas abas abertas.` Para testar com HTML
+local, use um servidor local (`python3 -m http.server 8765 --bind 127.0.0.1 --directory <pasta>`) e abra o
+endereço `http://127.0.0.1:8765/...`. Verificado com o código da rc7 (`4740971`), fora do AppImage e com um Chromium headless do Playwright, na fixture
+genérica de rádio: por `http://` a página é escolhida e localizada pelo adaptador heurístico; por `file://` ela é
+descartada antes da leitura.
+
 ## Requisitos e resíduos
 
 - **glibc 2.28 ou mais nova** (Linux x86_64). O build roda em AlmaLinux 8 (glibc 2.28) e o
@@ -82,6 +90,10 @@ está disponível e o daemon real está incluído (modo simulação por padrão,
   desktops). Em Ubuntu 22.04+ o modo FUSE dispensa `libfuse2` (medido em contêiner; o Zorin 17/18, base Ubuntu, não foi testado).
 - **Sem FUSE:** `--appimage-extract-and-run` (ou `APPIMAGE_EXTRACT_AND_RUN=1`) extrai o
   pacote (~600 MB) em `TMPDIR` (padrão `/tmp`) e o deixa lá. Veja a seção de extração acima.
+  Para liberar o espaço, com o Dracaena fechado, na pasta do arquivo:
+  `rm -rf "${TMPDIR:-/tmp}/appimage_extracted_$(md5sum dracaena-x86_64.AppImage | cut -d' ' -f1)"`
+  (apaga só o diretório desta versão). Em FUSE sobra um diretório vazio `.mount_dracae*`; `rmdir` o remove.
+  Não limpamos no `AppRun`: ele termina com `exec` e o diretório é reaproveitado entre execuções.
 - **python-xlib** (atalho global X11) fica fora do AppImage da fase 1. Ele vem de
   `requirements.txt` só para a UI. O build usa `requirements-build.txt`, que não o lista,
   e o pacote não tem arquivos `xlib`.
@@ -95,6 +107,12 @@ caminho não existe, então `entry.py` aponta `SSL_CERT_FILE` para o primeiro pa
 entre `/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt`,
 `/etc/ssl/ca-bundle.pem`, `/etc/pki/tls/cert.pem` e `/etc/ssl/cert.pem`. `SSL_CERT_FILE` e
 `SSL_CERT_DIR` definidos pelo usuário têm prioridade.
+
+**OpenSSL 1.1.1k (decisão da 0.1.0).** O Python embutido usa o OpenSSL 1.1.1k da AlmaLinux 8, fora do suporte
+upstream. O Dracaena só faz HTTP local pelo Python (CDP em `127.0.0.1`; nenhum `https://` em `lib/`), o Chromium usa
+BoringSSL próprio e o driver do Playwright traz o OpenSSL dele, então a release mantém a 1.1.1k (~4,6 MB do pacote).
+`--py-selftest-https` é só diagnóstico. Se um recurso futuro usar HTTPS pelo Python, o build deve migrar para
+OpenSSL 3 antes (OpenSSL 3.5.9 compilou com o Python 3.12.8 em teste, ~70 s a mais no build e ~11 MB a mais).
 
 ## Verificação dos 16 casos
 
